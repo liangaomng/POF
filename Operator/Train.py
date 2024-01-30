@@ -29,9 +29,10 @@ class branch_net(nn.Module):
 
 
 # 测试 and plot 
-def test(folder,epoch,test_data,condition):
+def test(folder,epoch,test_data,condition,device):
 
     test_data=torch.from_numpy(test_data)
+    test_data=test_data.to(device)
     
     pred_data=np.zeros_like(test_data)
 
@@ -87,6 +88,7 @@ if __name__ == "__main__":
     #记录日期
     dat="24_1_29"
     model_save_path=f"Model/{dat}"
+    device= torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     # 加载 .mat 文件
     Train_mat_file = ['Data/A_0.3_L_2.0_wave_data.mat',
                       'Data/A_0.3_L_5.0_wave_data.mat']
@@ -99,8 +101,8 @@ if __name__ == "__main__":
     train_loader=DataLoader(train_OE_Data,batch_size=200,shuffle=True,drop_last=True)
     
     #两个网络
-    fno=FNO(n_modes=(64,64),hidden_channels=64,in_channels=2,out_channels=2)
-    bran_nn=branch_net(2,50,1)
+    fno=FNO(n_modes=(64,64),hidden_channels=64,in_channels=2,out_channels=2).to(device)
+    bran_nn=branch_net(2,50,1).to(device)
     mse=torch.nn.MSELoss()
     optimzer1=torch.optim.Adam(fno.parameters(),lr=0.001)
     optimzer2=torch.optim.Adam(bran_nn.parameters(),lr=0.001)
@@ -113,7 +115,11 @@ if __name__ == "__main__":
     for epoch in range(num_epochs):
        
       for i,(data,next_t,condition) in enumerate(train_loader):
-
+         
+         data=data.to(device)
+         condition=condition.to(device)
+         next_t=next_t.to(device)
+         
          expand_size=data.shape[-2] #300 =100*3
    
          out=bran_nn(condition)
@@ -147,7 +153,8 @@ if __name__ == "__main__":
                         folder=model_save_path,
                         epoch=epoch,
                         test_data=test_np_data,
-                        condition=test_OE_Data.conditions_to_tensor())
+                        condition=test_OE_Data.conditions_to_tensor(),
+                        device=device)
          test_losses[epoch]= test_loss
          
       if epoch % 100 == 0 and epoch != 0:
