@@ -108,9 +108,9 @@ class branch_net(nn.Module):
         super(branch_net,self).__init__()
             
         self._net = nn.Sequential(nn.Linear(input, hidden),
-                    nn.ReLU(),
+                    nn.tanh(),
                     nn.Linear(hidden, hidden),
-                    nn.ReLU(),
+                    nn.tanh(),
                     nn.Linear(hidden, output),
                     )
     def forward(self,x):
