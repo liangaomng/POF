@@ -29,7 +29,7 @@ class branch_net(nn.Module):
        
         out=self._net(x)
         return out
-
+      
 def plot_test_performance(folder,epoch,**kwargs):
     #SSIM是基于对亮度、对比度和结构三个不同维度的比较计算得出的。
     # 具体来说，SSIM越接近1，意味着两幅图像在视觉上越相似；
@@ -43,31 +43,49 @@ def plot_test_performance(folder,epoch,**kwargs):
     l_SSIM = kwargs["Local_metric"].Local_dict["ssim"]
     l_PSNR = kwargs["Local_metric"].Local_dict["psnr"]
     l_MSE = kwargs["Local_metric"].Local_dict["mse"]
-      
-      
-    fig,ax= plt.subplots(3,1,figsize=(12,12))
-    ax[0].plot(range(epoch),g_PSNR[:epoch], label="Global PSNR", linestyle='-',
-               linewidth=3,marker="o")
-    ax[0].plot(range(epoch),l_PSNR[:epoch], label="Local PSNR", linestyle='--',
-               linewidth=3,marker="s")
-    ax[0].set_title(f"PSNR_{epoch}_"+kwargs["title"]+f"alpha_{alpha}")
-    ax[0].legend()
     
-    ax[1].plot(range(epoch),g_SSIM[:epoch],label="Global SSIM",linestyle='-',
+    #loss
+    training_losses = kwargs["training_losses"]
+    test_losses = kwargs["test_losses"]
+    
+    num_points= int (epoch / 10) + 1
+      
+    fig,ax= plt.subplots(4,1,figsize=(12,12))
+    
+    ax[0].plot(range(num_points),g_PSNR, label="Global PSNR", linestyle='-',
                linewidth=3,marker="o")
-    ax[1].plot(range(epoch),l_SSIM[:epoch],label="Global SSIM",linestyle='--',
+    ax[0].plot(range(num_points),l_PSNR, label="Local PSNR", linestyle='--',
+               linewidth=3,marker="s")
+    # 设置刻度标签，确保标签反映实际的epoch数
+    ax[0].set_title(f"PSNR_{epoch}_"+kwargs["title"]+f"_alpha_{alpha}")
+    ax[0].legend()
+    ax[0].set_xlabel('x10 epoch ')  # 添加x轴的标签
+    
+    ax[1].plot(range(num_points),g_SSIM,label="Global SSIM",linestyle='-',
+               linewidth=3,marker="o")
+    ax[1].plot(range(num_points),l_SSIM,label="Local SSIM",linestyle='--',
                linewidth=3,marker="s")
     ax[1].set_title(f"SSIM_{epoch}_"+kwargs["title"])
     ax[1].legend()
     
-    ax[2].plot(range(epoch),g_MSE[:epoch], label="Global MSE",linestyle='-',
+    ax[2].plot(range(num_points),g_MSE, label="Global MSE",linestyle='-',
                linewidth=3,marker="o")
-    ax[2].plot(range(epoch),l_MSE[:epoch], label="Local MSE",linestyle='--',
+    ax[2].plot(range(num_points),l_MSE, label="Local MSE",linestyle='--',
                linewidth=3,marker="s")
-  
+    ax[2].set_yscale('log')
     ax[2].set_title(f"MSE_{epoch}_"+kwargs["title"])
     ax[2].legend()
-    plt.title(f"Losses up to Epoch")
+    
+    ax[3].plot(range(num_points),training_losses, label="Training loss", 
+             linewidth=3,linestyle='-')
+    ax[3].plot(range(num_points),test_losses, label="Test Mean step loss",linewidth=3,
+             linestyle='--')
+    ax[3].legend()
+    ax[3].set_yscale('log')
+    ax[3].set_title(f"Losses up to Epoch")
+    
+    plt.tight_layout()
+    
     plt.savefig(f"{folder}/Test_performance_{kwargs['title']}.png")
     plt.close()
    
@@ -86,21 +104,21 @@ def test(folder,epoch,test_loader,device,norm_transform):
         data=data.to(device)
         test_data=data
         t_steps= data.shape[2]-1
-        for j in range(t_steps):
-
-          fno_out=fno(data[:,:,j:j+1,:])#[batch, 3, 1, 300]，1是时间步
+        #对整个序列做变换
+        fno_out=fno(data)#[batch, 3, 640, 300]，640是时间步
       
-          out=bran_nn(condition)
-          out=out.unsqueeze(-1)
-          out=out.unsqueeze(-1)
-          
-          final_out=fno_out*out
-          #反归一化
-          if norm_transform is not None:
-            final_out=norm_transform.inverse(final_out)
-          pred_data[:,:,j:j+1,:] = final_out
-
-          loss+=mse(final_out,data[:,:,j:j+1,:])
+        out=bran_nn(condition)
+        out=out.unsqueeze(-1)
+        out=out.unsqueeze(-1)
+  
+        final_out=fno_out*out
+      
+        # #反归一化
+        # if norm_transform is not None:
+        #   final_out=norm_transform.inverse(final_out)
+        pred_data = final_out
+        
+        loss+=mse(final_out,data)
           
     Mean_step_loss=(loss/t_steps).item()
     fig,ax= plt.subplots(1,3,figsize=(12,12))
@@ -224,35 +242,42 @@ if __name__ == "__main__":
   optimzer1=torch.optim.Adam(fno.parameters(),lr=args.lr)
   optimzer2=torch.optim.Adam(bran_nn.parameters(),lr=args.lr)
 
-  losses = np.zeros(num_epochs)  # 提前分配内存空间
-  test_losses=np.zeros(num_epochs)
+  losses = [] # 提前分配内存空间
+
+  test_losses = []
    
   print("start train")
   for epoch in range(num_epochs):
     
-    print("epoch:",epoch)
+    print("epoch:",epoch,flush=True)
     
     for i,(data,condition) in enumerate(train_loader):
       loss=0
       data=data.to(device) #[batch,3,t_steps,300]
       condition=condition.to(device) #[batch,2(A and L)]
       t_steps=data.shape[2]-1
-      #fno 时间迭代
-      for j in range(t_steps):
-   
-        fno_out=fno(data[:,:,j:j+1,:]) #[4, 3, 1, 300]，1是时间步
 
-        expand_size=data.shape[-2] #300 =100*3
-        out=bran_nn(condition)
-        out=out.unsqueeze(-1)
-        out=out.unsqueeze(-1)
-        #([batch, 3, 1, 300])
-        final_out=fno_out*out
-        #重点关注alpha对于 shelf
-        # shelf 在100:200
+      #对序列进行fno
+      fno_out=fno(data) #[4, 3, 640, 300]，640是时间步
+
+      expand_size=data.shape[-2] #300 =100*3
+      out=bran_nn(condition)
+      out=out.unsqueeze(-1)
+      out=out.unsqueeze(-1)
+      #([batch, 3, 1, 300])
+      final_out=fno_out*out
+
+      #重点关注alpha对于 shelf
+      # shelf 在100:200
+      # 计算 100:200 区间以外的损失贡献
       
-        loss+=(1-alpha)*mse(final_out,data[:,:,j:j+1,:]) +\
-          alpha * mse(final_out[:,2,:,100:200],data[:,2,j:j+1,100:200])
+      outside_indices_loss = mse(final_out[:, :, :, :100], data[:, :, :, :100]) + \
+                            mse(final_out[:, :, :, 200:], data[:, :, :, 200:])
+      # 计算 100:200 区间内的损失贡献
+      inside_indices_loss = mse(final_out[:, 2, :, 100:200], data[:, 2, :, 100:200])
+                            
+      loss+=(1-alpha)*outside_indices_loss+ \
+            alpha * mse(final_out[:,2,:,100:200],data[:,2,:,100:200])
 
       optimzer1.zero_grad()
       optimzer2.zero_grad()
@@ -261,38 +286,47 @@ if __name__ == "__main__":
       optimzer1.step()
       optimzer2.step()
 
-    losses[epoch] = loss.item()
-
-  
-    print(f"epoch:{epoch},loss:{loss}",flush=True)
-    if epoch % 10 == 0:
     
-       test_loss,Global_metric,Local_metric=test(
-                      folder=model_save_path,
-                      epoch=epoch,
-                      test_loader=test_loader,
-                      device=device,
-                      norm_transform=None)
-       test_losses[epoch]= test_loss
+    print(f"epoch:{epoch},loss:{loss}",flush=True)
+    
 
-
-    if epoch % 10 == 0 and epoch != 0:
-      prev_loss= losses[-2]
+    if epoch % 10 == 0 :
+      #训练loss
+      losses.append(loss.item())
       
-      if prev_loss > losses[-1]:
-        print("save model")
+      test_mean_step_loss,Global_metric,Local_metric=test(
+                                                          folder=model_save_path,
+                                                          epoch=epoch,
+                                                          test_loader=test_loader,
+                                                          device=device,
+                                                          norm_transform=None)
+                                                  
+      test_losses.append( test_mean_step_loss )
+      if epoch == 0:
+        prev_loss= losses[-1]
+      else:
+        prev_loss= losses[-2]
+      
+      if prev_loss > loss.item() :
+        print("save best model")
         torch.save(fno.state_dict(), f"{model_save_path}/fno.pth")
         torch.save(bran_nn.state_dict(), f"{model_save_path}/branch_nn.pth")
-      plot_losses(losses, test_losses, model_save_path, epoch)
-      plot_test_performance(model_save_path,epoch,
-                            Local_metric=Local_metric,Global_metric=Global_metric,title="Global and Local")
+        
+      if epoch >0:
+        
+        plot_test_performance(model_save_path,epoch,
+                              Local_metric=Local_metric,Global_metric=Global_metric,title="Global and Local",
+                              training_losses=losses,test_losses=test_losses)
 
 
-  # 保存训练损失和测试损失 npz
-  
-  np.savez(f"{model_save_path}/seed_{seed}_modes{fno_modes}_alpha_{alpha}_losses.npz",
-            training_loss=losses, test_loss=test_losses,global_metric=Global_metric.Global_dict,
-            local_metric=Local_metric.Local_dict)
+    # 保存训练损失和测试损失 npz
+    if epoch % 10 == 0 and epoch != 0:
+      
+      print("save")
+      np.savez(f"{model_save_path}/seed_{seed}_modes{fno_modes}_alpha_{alpha}_losses_with_epoch.npz",
+                training_loss=losses, test_loss=test_losses,global_metric=Global_metric.Global_dict,
+                local_metric=Local_metric.Local_dict,epoch=epoch)
+      
   print("done")
 
       
