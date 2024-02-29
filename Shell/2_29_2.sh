@@ -1,4 +1,4 @@
-echo 
+
 # Array of alpha values
 alpha_values=(0.6 0.7 0.8 0.9 1.0)
 
@@ -9,7 +9,6 @@ seed_values=(10 100 200)
 modes=32
 base_dat="2_29_expr_"
 Train_epoch=4000
-
 expr_order=1
 
 # Loop over each alpha value
