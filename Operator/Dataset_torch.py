@@ -9,26 +9,35 @@ import scipy.io
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from torchvision import transforms
+
+
 
 class OE_Dataset(Dataset):
-    def __init__(self, data,condition,transformer=None):
-        self.data = data
-        self.condition=condition#{'Data/A_0.3_L_2.0_wave_data.mat': {'A': 0.3, 'L': 2.0}, 'Data/A_0.3_L_5.0_wave_data.mat': {'A': 0.3, 'L': 5.0}}
-        self.transform=transformer
+    def __init__(self, data,condition,**kwargs):
+      
+        device= torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.data = torch.tensor(data,dtype=torch.float32).to(device)
+        self.condition=condition
+         # 实例化NormalizeTransform类
+        self.norm_transform = NormalizeTransform(mean=kwargs['mean'], 
+                                                 std=kwargs['std'])
     def __len__(self):
-        # 数据集大小为总时间步数减一，因为我们总是预测下一个时间步
-        return self.data.shape[1] - 1
+        
+        return  self.data.shape[0]
 
     def __getitem__(self, idx):
-        # 返回当前时间步和下一个时间步的数据和condition 
-        #这里condition的是A和L $#注意data (n, 640, 300, 3)
+    
+        #这里condition的是A和L $#注意data (n_files, 640, 300, 3) 
         self.con_tensor=self.conditions_to_tensor()
-        #print("con_tensor",self.con_tensor.shape)  idx是时间维度
-        if self.transform:
-            print("bianhuan")
-            self.data[:,idx,:,:] = self.transform(self.data[:,idx,:,:])
-            self.data[:,idx + 1,:,:] = self.transform(self.data[:,idx + 1,:,:])
-        return self.data[:,idx,:,:], self.data[:,idx + 1,:,:],self.con_tensor[:,:]
+        # #对第三个通道-解进行归一化
+        # data=self.norm_transform (self.data[:,:,:,2])
+        # #放回
+        # self.data[:,:,:,2]=data
+
+        #permute 成【n_files, 3, 640, 300】
+        permute_data=self.data.permute(0,3,1,2)
+        return permute_data[idx,:,:,:], self.con_tensor[idx,:]
     
     def conditions_to_tensor(self):
        # 假设每个条件都有2个值（A和L）
@@ -39,6 +48,8 @@ class OE_Dataset(Dataset):
             tensor[i, 1] = torch.tensor(value['L'], dtype=torch.float32)  # 第二个值是L
 
         return tensor
+    def Get_transform(self): 
+        return self.norm_transform
 
 # 自定义归一化变换
 class NormalizeTransform:
@@ -59,6 +70,7 @@ class Read_Mat_4torch():
         self.mat_file = mat_file
         # 正则表达式模式
         self.CONDITIONS = {}
+        self.datas = None  # 初始化datas为None
         for i,mat in enumerate(mat_file):
             pattern = r'A_([0-9.]+)_L_([0-9.]+)'
 
@@ -73,6 +85,7 @@ class Read_Mat_4torch():
     def _read_mat(self):
         
         for i,mat in enumerate(self.mat_file):
+            print("i",i)
             self.data = scipy.io.loadmat(mat)
             #(640,100,3)
             self.wave_data = self.data['wave_data'][0, 0]
@@ -82,26 +95,33 @@ class Read_Mat_4torch():
             self.deepsea_data = self.wave_data['deepsea'].reshape(640,100,3).astype(np.float32)
             self.slope_data =  self.wave_data['slope'].reshape(640,100,3).astype(np.float32)
             self.normal_data =  self.wave_data['normal'].reshape(640,100,3).astype(np.float32)
-            #把三段数据拼接起来
-            #datas (640, 300, 3)
-            self.datas=np.concatenate((self.deepsea_data,self.slope_data,self.normal_data),axis=1)
-            # 不同的文件的维度是[n,640.300,3]
+       
+            current_data=np.concatenate((self.deepsea_data,self.slope_data,self.normal_data),axis=1)
+
+            current_data=current_data.reshape(-1,640,300,3) 
+
+            # 不同的文件的维度是[n,640,300,3] 3 是3 个同搭配
             
             if i==0:
-                self.datas=self.datas
+                self.datas=current_data
                 
             else:
-                self.datas=np.concatenate((self.datas,self.datas),axis=0)
+                print("test", self.datas.shape)
+                
+                self.datas=np.concatenate((self.datas,current_data),axis=0)
                 self.datas=self.datas.reshape(-1,640,300,3)
-            print("after concat",self.datas.shape)
-        # 假设 train_data 是你的训练数据
-        mean = self.datas.mean()
-        std = self.datas.std()
-        # 创建归一化变换实例
-        normalize_transform = NormalizeTransform(mean, std)
+                
+
+            
+        # dim=[0, 2, 3]告诉PyTorch沿着批次（0维）、高度（2维）、宽度（3维）维
+        #返回训练的三个通道（解）的均值和标准差
+        mean = self.datas.mean(axis=(0, 1, 2))
+        std = self.datas.std(axis=(0, 1, 2))
+      
         
-        OE_Data=OE_Dataset(self.datas,self.CONDITIONS)
-        return self.datas,OE_Data
+        OE_Data=OE_Dataset(self.datas,self.CONDITIONS,mean=mean[-1],std=std[-1])
+        norm_transform=OE_Data.Get_transform()
+        return self.datas,OE_Data,norm_transform
 
 class branch_net(nn.Module):
     def __init__(self,input,hidden,output):
@@ -116,64 +136,7 @@ class branch_net(nn.Module):
     def forward(self,x):
         out=self._net(x)
         return out
-        
-from neuralop.models import FNO       
-        
-if __name__ == "__main__":
-    # 加载 .mat 文件
-    mat_file = ['Data/A_0.3_L_2.0_wave_data.mat','Data/A_0.3_L_5.0_wave_data.mat']
-    
-    
-    np_data,OE_Data=Read_Mat_4torch(mat_file)._read_mat()
-    DataLoader=DataLoader(OE_Data,batch_size=20,shuffle=True)
-    fno=FNO(n_modes=(16,16),hidden_channels=12,in_channels=2,out_channels=2)
-    mse=torch.nn.MSELoss()
-    optimze=torch.optim.Adam(fno.parameters(),lr=0.001)
-    bran_out=branch_net(2,50,1)
-    for epoch in range(10):
-        for i,(data,next_t,condition) in enumerate(DataLoader):
-            data=data[:,:,:,:]
-            condition=condition
-            expand_size=data.shape[-2]
-    
-            out=bran_out(condition)
-            out=out.unsqueeze(-2)
-            out=out.repeat(1,1,300,1)
 
-
-            fno_out=fno(data)
-            print("data",data.shape)
-
-            final=fno_out*out
-            true=next_t[:,:,:].float()
-            loss=mse(final,true)
-            optimze.zero_grad()
-            loss.backward()
-            optimze.step()
-        print(f"epoch:{epoch},loss:{loss}")
-            
-    np_data=np_data[:,:,:,:]
-    print(np_data.shape)
-    # 测试
-    test=np.zeros_like(np_data)
-    with torch.no_grad():
-        for i in range(639):
-            fnp_out=fno(torch.tensor(np_data[:,i:i+2,:,:], dtype=torch.float32))
-
-            out=bran_out(OE_Data.conditions_to_tensor())
-            out=out.unsqueeze(-2)
-            out=out.repeat(1,1,300,1)
-            #([2, 2, 300, 3])
-            test[:,i:i+2,:,:]=(fnp_out*out).cpu().numpy()
-    print(test.shape)
-    fig,ax= plt.subplots(1,2,figsize=(10,8))
-    ax[1].imshow(test[0,:,:,2],cmap='jet',vmin=0, vmax=0.5)
-    ax[1].set_title("predict")
-    ax[0].imshow(np_data[0,:,:,2],cmap='jet',vmin=0, vmax=0.5)
-    ax[0].set_title("true")
-    plt.show()
-            
-    
 
             
 
