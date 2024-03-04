@@ -1,6 +1,6 @@
 
 # Array of alpha values
-alpha_values=(0.6 0.7 0.8 0.9 1.0)
+alpha_values=(0.3 0.4)
 
 # Array of seed values
 seed_values=(10 100 200)

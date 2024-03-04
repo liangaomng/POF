@@ -1,6 +1,6 @@
-echo 
+
 # Array of alpha values
-alpha_values=(0.1 0.2 0.3 0.4 0.5)
+alpha_values=(0.1 0.2)
 
 # Array of seed values
 seed_values=(10 100 200)
