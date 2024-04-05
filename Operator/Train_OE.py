@@ -1,7 +1,7 @@
 
 from neuralop.models import FNO
 from torch import nn
-from Dataset_torch import Read_Mat_4torch
+from Dataset_torch import Read_OE_Mat_4torch
 from torch.utils.data import DataLoader
 import torch
 import numpy as np
@@ -121,23 +121,23 @@ def test(folder,epoch,test_loader,device,norm_transform):
         loss+=mse(final_out,data)
           
     Mean_step_loss=(loss/t_steps).item()
-    fig,ax= plt.subplots(1,3,figsize=(12,12))
+    fig,ax= plt.subplots(1,3,figsize=(12,8))
     #画图预测第一个batch的数据
-    cax1=ax[0].imshow(test_data[0,2,:,:].cpu().numpy(),cmap="jet",vmin=0,vmax=0.6)
-    ax[0].set_title("True"+f"A_{condition[0,0].item():.2f}"+f"L_{condition[0,1].item():.2f}") 
-    cax2=ax[1].imshow(pred_data[0,2,:,:].cpu().numpy(),cmap="jet",vmin=0,vmax=0.6)
+    cax1=ax[0].imshow(test_data[0,2,:,:].cpu().numpy(),cmap="jet",vmin=0,vmax=0.4)
+    ax[0].set_title("True"+f"A_{condition[0,0].item():.2f}"+f"_L_{condition[0,1].item():.2f}"+f"_dr_{condition[0,2].item():.2f}") 
+    cax2=ax[1].imshow(pred_data[0,2,:,:].cpu().numpy(),cmap="jet",vmin=0,vmax=0.4)
     ax[1].set_title("Pred")
     # Add a colorbar
-    fig.colorbar(cax1, fraction=0.046, pad=0.04,orientation='horizontal', location='top')
-    fig.colorbar(cax2, fraction=0.046, pad=0.04,orientation='horizontal', location='top')
+    fig.colorbar(cax1, fraction=0.03, pad=0.04,orientation='horizontal', location='top')
+    fig.colorbar(cax2, fraction=0.03, pad=0.04,orientation='horizontal', location='top')
     #abs
     cax3=ax[2].imshow(np.abs(test_data[0,2,:,:].cpu().numpy()-pred_data[0,2,:,:].cpu().numpy()),
                       cmap="jet",
                       vmin=0,vmax=0.1)
-    fig.colorbar(cax3,fraction=0.046, pad=0.04,orientation='horizontal', location='top')
+    fig.colorbar(cax3,fraction=0.03, pad=0.04,orientation='horizontal', location='top')
     ax[2].set_title("Abs error")
     #记录global 误差test_data [batch,3,640,300]，640为时间步
-  
+    plt.tight_layout()
 
     global_metric.Calulate(test_data[0,2,:,:].cpu().numpy(),pred_data[0,2,:,:].cpu().numpy())
     #记录local 误差
@@ -173,7 +173,7 @@ if __name__ == "__main__":
   # 添加alpha参数
   parser.add_argument('--alpha', type=float, help='alpha to control global and local weight ')
   # 添加fno mode参数
-  parser.add_argument('--modes', type=int, default=32,help='modes of fno')
+  parser.add_argument('--modes', type=int, default=128,help='modes of fno')
   # 添加seed参数
   parser.add_argument('--seed', type=int, default=1234,help='seeds exprs')
   #保存的参数
@@ -183,9 +183,9 @@ if __name__ == "__main__":
 
   # 向另一个参数组中添加参数，基本都是默认
   Train.add_argument('--epoch',type=int,default=5000, help='epoch of train')
-  Train.add_argument('--batch_size',type=int,default=40, help='batch_size of train')
+  Train.add_argument('--batch_size',type=int,default=30, help='batch_size of train')
   Train.add_argument('--lr',type=float,default=0.001, help='learning rate of train')
-  Train.add_argument("--data_folder",type=str,default="Data/Train/Train1d",help="train folder")
+  Train.add_argument("--data_folder",type=str,default="Data/Train/oe_data/tar/tar",help="train folder")
   # 解析命令行参数
   args = parser.parse_args()
   
@@ -211,11 +211,13 @@ if __name__ == "__main__":
       json.dump(args_dict, json_file, indent=4)
       
   # copy 此文件到保存的文件夹作为存档
-  shutil.copy("Operator/Train.py",f"Model_out/{dat}/Train.py")
+  shutil.copy("Operator/Train_OE.py",f"Model_out/{dat}/Train_OE.py")
   model_save_path=f"Model_out/{dat}"
   device= torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
   # 加载 .mat 文件
   All_mat_file= return_name_list(folder=args.data_folder)
+
+
   # 打乱文件列表以确保随机性
   np.random.shuffle(All_mat_file)
 
@@ -227,17 +229,17 @@ if __name__ == "__main__":
   test_files = All_mat_file[train_size:]
 
   #Test_mat_file= return_name_list(folder="Data/Test")
-  train_np_data,train_OE_Data,norm_transform=Read_Mat_4torch(mat_file=train_files)._read_mat()
+  train_np_data,train_OE_Data,norm_transform=Read_OE_Mat_4torch(mat_file=train_files)._read_mat()
 
 
-  test_np_data,test_OE_Data,norm_transform=Read_Mat_4torch(mat_file=test_files)._read_mat()
+  test_np_data,test_OE_Data,norm_transform=Read_OE_Mat_4torch(mat_file=test_files)._read_mat()
   
   train_loader=DataLoader(train_OE_Data,batch_size=args.batch_size,shuffle=True)
   test_loader=DataLoader(test_OE_Data,batch_size=args.batch_size,shuffle=True)
   
   #3个channnel 是三个形态
-  fno=FNO(n_modes=(fno_modes,fno_modes),hidden_channels=12,in_channels=3,out_channels=3).to(device)
-  bran_nn=branch_net(2,50,1).to(device)
+  fno=FNO(n_modes=(fno_modes,fno_modes),hidden_channels=8,in_channels=3,out_channels=3).to(device)
+  bran_nn=branch_net(3,50,1).to(device)
   mse=torch.nn.MSELoss()
   optimzer1=torch.optim.Adam(fno.parameters(),lr=args.lr)
   optimzer2=torch.optim.Adam(bran_nn.parameters(),lr=args.lr)
@@ -253,7 +255,7 @@ if __name__ == "__main__":
     
     for i,(data,condition) in enumerate(train_loader):
       loss=0
-      data=data.to(device) #[batch,3,t_steps,300]
+      data=data.to(device) #[batch,3,t_steps,300] #condition 是3个
       condition=condition.to(device) #[batch,2(A and L)]
       t_steps=data.shape[2]-1
 
@@ -261,6 +263,7 @@ if __name__ == "__main__":
       fno_out=fno(data) #[4, 3, 640, 300]，640是时间步
 
       expand_size=data.shape[-2] #300 =100*3
+
       out=bran_nn(condition)
       out=out.unsqueeze(-1)
       out=out.unsqueeze(-1)
