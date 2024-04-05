@@ -1,10 +1,8 @@
 
 ## Hi,there is the description for operator learning TASKS 
 
+![Alt text](test.gif)
 
-<video width="320" height="240" controls>
-  <source src="A_0.10_L_3.00_dr_0.40wave_simu.mp4" type="video/mp4">
-</video>
 
 ### there is two types of tasks , one is the meeting of NCHD  
 
