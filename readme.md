@@ -22,12 +22,9 @@ bash Shell/meeting/modes_128_1d/3_19_1.sh
 
 ### As for result, you could see the result for epoch =0 
 #### epoch=0
-<img src="Model_out/2_29_expr_alpha_0.1_seed_100/test10.png" alt="img" style="zoom:50%;" />
+<img src="test0.png" alt="img" style="zoom:50%;" />
 
-#### epoch=1000
-
-<img src="Model_out/2_29_expr_alpha_0.1_seed_100/test1000.png" alt="img" style="zoom:50%;" />
 
 #### epoch=2000
-<img src="Model_out/2_29_expr_alpha_0.1_seed_100/test1000.png" alt="img" style="zoom:50%;" />
+<img src="test2000.png" alt="img" style="zoom:50%;" />
 
