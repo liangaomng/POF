@@ -165,6 +165,40 @@ def set_seed(seed):
   torch.backends.cudnn.benchmark = False
 import numpy as np     
 
+def Get_4_folder(train_np_data,test_np_data):
+   # Define your folder name
+  folder_name = 'Data/pt_OE'
+   # Check if the folder exists, and if not, create it
+  if not os.path.exists(folder_name):
+      os.makedirs(folder_name)
+      # Define your folder and file name
+  file_name = 'oe_train_dataset.pt'
+  file_path = os.path.join(folder_name, file_name)
+
+  # Check if the specific file exists in the folder
+  if os.path.isfile(file_path):
+      print(f"The file {file_name} exists in {folder_name}.")
+      train_data = torch.load(f'{folder_name}/oe_train_dataset.pt')
+      train_dataset = train_data['train_dataset']
+
+      # Load the test dataset
+      test_data = torch.load(f'{folder_name}/oe_test_dataset.pt')
+      test_dataset = test_data['test_dataset']
+  else:
+      print(f"The file {file_name} does not exist in {folder_name}.")
+      # Save the train dataset and normalization transform
+      torch.save({
+          'train_dataset': train_np_data,
+      }, f'{folder_name}/oe_train_dataset.pt')
+
+      # Save the test dataset
+      torch.save({
+          'test_dataset': test_np_data
+      }, f'{folder_name}/oe_test_dataset.pt')
+
+  
+  return train_dataset,test_dataset
+   
 if __name__ == "__main__":
     #记录日期
   print("当前工作目录:", os.getcwd())
@@ -214,31 +248,36 @@ if __name__ == "__main__":
   shutil.copy("Operator/Train_OE.py",f"Model_out/{dat}/Train_OE.py")
   model_save_path=f"Model_out/{dat}"
   device= torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-  # 加载 .mat 文件
-  All_mat_file= return_name_list(folder=args.data_folder)
+  # # 加载 .mat 文件
+  # All_mat_file= return_name_list(folder=args.data_folder)
 
 
-  # 打乱文件列表以确保随机性
-  np.random.shuffle(All_mat_file)
+  # # 打乱文件列表以确保随机性
+  # np.random.shuffle(All_mat_file)
 
-  # 计算训练集的大小（70%）
-  train_size = int(len(All_mat_file) * 0.7)
+  # # 计算训练集的大小（70%）
+  # train_size = int(len(All_mat_file) * 0.7)
   
-  # 分割列表为训练集和测试集
-  train_files = All_mat_file[:train_size]
-  test_files = All_mat_file[train_size:]
+  # # 分割列表为训练集和测试集
+  # train_files = All_mat_file[:train_size]
+  # test_files = All_mat_file[train_size:]
 
-  #Test_mat_file= return_name_list(folder="Data/Test")
-  train_np_data,train_OE_Data,norm_transform=Read_OE_Mat_4torch(mat_file=train_files)._read_mat()
+  # #Test_mat_file= return_name_list(folder="Data/Test")
+  # train_np_data,train_OE_Data,norm_transform=Read_OE_Mat_4torch(mat_file=train_files)._read_mat()
 
 
-  test_np_data,test_OE_Data,norm_transform=Read_OE_Mat_4torch(mat_file=test_files)._read_mat()
-  
+  # test_np_data,test_OE_Data,norm_transform=Read_OE_Mat_4torch(mat_file=test_files)._read_mat()
+  train_OE_Data = None
+  test_OE_Data = None
+  # #  check .pt
+  train_OE_Data,test_OE_Data = Get_4_folder(train_OE_Data,test_OE_Data)
+
+
+
   train_loader=DataLoader(train_OE_Data,batch_size=args.batch_size,shuffle=True)
   test_loader=DataLoader(test_OE_Data,batch_size=args.batch_size,shuffle=True)
-  
   #3个channnel 是三个形态
-  fno=FNO(n_modes=(fno_modes,fno_modes),hidden_channels=8,in_channels=3,out_channels=3).to(device)
+  fno=FNO(n_modes=(fno_modes,fno_modes),hidden_channels=4,in_channels=3,out_channels=3).to(device)
   bran_nn=branch_net(3,50,1).to(device)
   mse=torch.nn.MSELoss()
   optimzer1=torch.optim.Adam(fno.parameters(),lr=args.lr)
@@ -249,18 +288,24 @@ if __name__ == "__main__":
   test_losses = []
    
   print("start train")
+
+
   for epoch in range(num_epochs):
     
     print("epoch:",epoch,flush=True)
     
     for i,(data,condition) in enumerate(train_loader):
+ 
       loss=0
       data=data.to(device) #[batch,3,t_steps,300] #condition 是3个
       condition=condition.to(device) #[batch,2(A and L)]
+
+
       t_steps=data.shape[2]-1
 
       #对序列进行fno
       fno_out=fno(data) #[4, 3, 640, 300]，640是时间步
+      print(fno_out.shape,flush=True)
 
       expand_size=data.shape[-2] #300 =100*3
 
@@ -269,6 +314,7 @@ if __name__ == "__main__":
       out=out.unsqueeze(-1)
       #([batch, 3, 1, 300])
       final_out=fno_out*out
+
 
       #重点关注alpha对于 shelf
       # shelf 在100:200
@@ -288,6 +334,7 @@ if __name__ == "__main__":
       loss.backward()
       optimzer1.step()
       optimzer2.step()
+
 
     
     print(f"epoch:{epoch},loss:{loss}",flush=True)
