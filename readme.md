@@ -1,8 +1,24 @@
 
-## Hi,there is the description for operator learning TASKS <img src="show.png" alt="img" style="zoom:30%;" />
+## There are the description for operator learning TASKS <img src="show.png" alt="img" style="zoom:30%;" />
 
 ![Alt text](test.gif)
 
+### what is the model's input and outputs?
+
+Here we use the Operator learning, the operator learns a mapping from a $ \eta (x_{0},t_{0}) -> \eta (x,t) $, the $x_{0}$ is a type of image  about (100,3), which means that 100 is the discrete elements in 3 type area. $t_{0}$ is the 1 which means that the initial step in the simulation.
+Therefore, we train the opertor $G(*,t,C_{i})$, which has a mapping relationship as followng, $C_{i}$ means the 3 type area:
+
+$$\eta (x_{0:99},t_{0},C_{i}) \overset{G}{\rightarrow} \eta (x_{0:99},t,C_{i}),t\in [0,639] , i \in [0,2]$$ 
+
+note: the 0:99 is the discrete x coords.
+
+Above is the opeartor learning in one case. In order to simlate more cases, we use the DeepOnet structure.
+
+Brannch net is mapping from the different the value （A and L）to a scalar.
+
+$$ \eta(x,t_{0:99},C) = Brann(A,L) \circ  G(*,t_{0},C)$$
+
+The model‘ output is [640，100，3], the input is [1,100,3]
 
 ### there is two types of tasks , one is the meeting of NCHD  
 

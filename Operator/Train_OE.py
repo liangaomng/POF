@@ -48,7 +48,7 @@ def plot_test_performance(folder,epoch,**kwargs):
     training_losses = kwargs["training_losses"]
     test_losses = kwargs["test_losses"]
     
-    num_points= int (epoch / 10) + 1
+    num_points= int (epoch / args.save_epoch) + 1
       
     fig,ax= plt.subplots(4,1,figsize=(12,12))
     
@@ -59,7 +59,7 @@ def plot_test_performance(folder,epoch,**kwargs):
     # 设置刻度标签，确保标签反映实际的epoch数
     ax[0].set_title(f"PSNR_{epoch}_"+kwargs["title"]+f"_alpha_{alpha}")
     ax[0].legend()
-    ax[0].set_xlabel('x10 epoch ')  # 添加x轴的标签
+    ax[0].set_xlabel(f'x{args.save_epoch} epoch ')  # 添加x轴的标签
     
     ax[1].plot(range(num_points),g_SSIM,label="Global SSIM",linestyle='-',
                linewidth=3,marker="o")
@@ -214,6 +214,8 @@ if __name__ == "__main__":
   parser.add_argument('--dat', type=str,  required=True,help='description of the exprs and save')
   # 添加可选参数的train
   Train=parser.add_argument_group('Train','Train paremeters')
+  #记录的epoch
+  parser.add_argument('--save_epoch',type=int,default=100)
 
   # 向另一个参数组中添加参数，基本都是默认
   Train.add_argument('--epoch',type=int,default=5000, help='epoch of train')
@@ -305,7 +307,7 @@ if __name__ == "__main__":
 
       #对序列进行fno
       fno_out=fno(data) #[4, 3, 640, 300]，640是时间步
-      print(fno_out.shape,flush=True)
+ 
 
       expand_size=data.shape[-2] #300 =100*3
 
@@ -340,7 +342,7 @@ if __name__ == "__main__":
     print(f"epoch:{epoch},loss:{loss}",flush=True)
     
 
-    if epoch % 10 == 0 :
+    if epoch % args.save_epoch == 0 :
       #训练loss
       losses.append(loss.item())
       
@@ -370,7 +372,7 @@ if __name__ == "__main__":
 
 
     # 保存训练损失和测试损失 npz
-    if epoch % 10 == 0 and epoch != 0:
+    if epoch % args.save_epoch == 0 and epoch != 0:
       
       print("save")
       np.savez(f"{model_save_path}/seed_{seed}_modes{fno_modes}_alpha_{alpha}_losses_with_epoch.npz",

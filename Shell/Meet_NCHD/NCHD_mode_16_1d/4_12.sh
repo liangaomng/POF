@@ -1,15 +1,16 @@
 
 # Array of alpha values
-alpha_values=(0.9)
+alpha_values=(0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9)
 
 # Array of seed values
-seed_values=(10)
+seed_values=(10 100 200)
 
 # Set other parameters
-modes=128
-base_dat="4_3_expr_"
-Train_epoch=4000
+modes=256
+base_dat="Data_Expr_NCHD/4_12_expr_"
+Train_epoch=6100
 expr_order=1
+Data_set="Data/Train/NCHD"
 
 # Loop over each alpha value
 for alpha in "${alpha_values[@]}"
@@ -30,8 +31,9 @@ do
     export Train_epoch=$Train_epoch
 
     # Run the Python script with the current set of parameters
-    python Operator/Train_OE.py --alpha $alpha --modes $modes --seed $seed --dat $dat --epoch $Train_epoch 
-
+    #python Operator/Train_NCHD.py --alpha $alpha --modes $modes --seed $seed --dat $dat --epoch $Train_epoch --data_folder $Data_set
+   
+    accelerate launch Operator/Train_NCHD.py  --alpha $alpha --modes $modes --seed $seed --dat $dat --epoch $Train_epoch --data_folder $Data_set
     # Echo finish after each run
     echo "Finished with alpha=$alpha, seed=$seed"
     #序列

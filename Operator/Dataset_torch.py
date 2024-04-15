@@ -14,7 +14,7 @@ from torchvision import transforms
 
 
 class OE_Dataset(Dataset):
-    def __init__(self, data,condition,**kwargs):
+    def __init__(self, data,condition,task="NCHD",**kwargs):
       
         device= torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.data = torch.tensor(data,dtype=torch.float32).to(device)
@@ -22,7 +22,7 @@ class OE_Dataset(Dataset):
          # 实例化NormalizeTransform类
         self.norm_transform = NormalizeTransform(mean=kwargs['mean'], 
                                                  std=kwargs['std'])
-        self.task =kwargs["task"]
+        self.task =task
     def __len__(self):
         
         return  self.data.shape[0]
@@ -31,31 +31,29 @@ class OE_Dataset(Dataset):
     
         #这里condition的是A和L $#注意data (n_files, 640, 300, 3) 
         self.con_tensor=self.conditions_to_tensor()
-        # #对第三个通道-解进行归一化
-        # data=self.norm_transform (self.data[:,:,:,2])
-        # #放回
-        # self.data[:,:,:,2]=data
-
         #permute 成【n_files, 3, 640, 300】
         permute_data=self.data.permute(0,3,1,2)
-        return permute_data[idx,:,:,:], self.con_tensor[idx,:]
+        # 应用归一化
+        #normalized_data = self.norm_transform(permute_data[idx])
+        return permute_data[idx], self.con_tensor[idx,:]
     
     def conditions_to_tensor(self):
        # 假设每个条件都有2个值（A和L）
-        if self.task =="OE":#3 个条件
-            tensor = torch.zeros((len(self.condition), 3), dtype=torch.float32)
-        else:
+        if self.task =="NCHD":# 2个条件
+            
             tensor = torch.zeros((len(self.condition), 2), dtype=torch.float32)
+       
         
         for i, (key, value) in enumerate(self.condition.items()):
             tensor[i, 0] = torch.tensor(value['A'], dtype=torch.float32)  # 第一个值是A
             tensor[i, 1] = torch.tensor(value['L'], dtype=torch.float32)  # 第二个值是L
-            if self.task =="OE":
-                tensor[i, 2] = torch.tensor(value['dr'], dtype=torch.float32)  # 第二个值是L
 
         return tensor
     def Get_transform(self): 
         return self.norm_transform
+    def Inverse_transform(self,x):
+        
+        return self.norm_transform.inverse(x)
 
 # 自定义归一化变换
 class NormalizeTransform:
@@ -97,7 +95,8 @@ class Read_Mat_4torch():
             self.wave_data = self.data['wave_data'][0, 0]
             # 有三段
             title=["deepsea","slope","normal"]
-            #时间，空间，3
+            #时间，空间，3 表示x，t，eta(x,y)
+    
             self.deepsea_data = self.wave_data['deepsea'].reshape(640,100,3).astype(np.float32)
             self.slope_data =  self.wave_data['slope'].reshape(640,100,3).astype(np.float32)
             self.normal_data =  self.wave_data['normal'].reshape(640,100,3).astype(np.float32)
@@ -120,13 +119,13 @@ class Read_Mat_4torch():
 
             
         # dim=[0, 2, 3]告诉PyTorch沿着批次（0维）、高度（2维）、宽度（3维）维
-        #返回训练的三个通道（解）的均值和标准差
+        #返回训练的三个通道（x,t,eta(x,t)）的均值和标准差
         mean = self.datas.mean(axis=(0, 1, 2))
         std = self.datas.std(axis=(0, 1, 2))
-      
-        
-        OE_Data=OE_Dataset(self.datas,self.CONDITIONS,mean=mean[-1],std=std[-1])
+
+        OE_Data = OE_Dataset(self.datas,self.CONDITIONS,mean=mean[-1],std=std[-1])
         norm_transform=OE_Data.Get_transform()
+        
         return self.datas,OE_Data,norm_transform
 
 class Read_OE_Mat_4torch():
@@ -185,10 +184,11 @@ class Read_OE_Mat_4torch():
         #返回训练的三个通道（解）的均值和标准差
         mean = self.datas.mean(axis=(0, 1, 2))
         std = self.datas.std(axis=(0, 1, 2))
-      
+        print("mean")
+        print("std")
         
-        OE_Data=OE_Dataset(self.datas,self.CONDITIONS,mean=mean[-1],std=std[-1],task="OE")
-        norm_transform=OE_Data.Get_transform()
+        OE_Data = OE_Dataset(self.datas,self.CONDITIONS,mean=mean[-1],std=std[-1],task="NCHD")
+        norm_transform = OE_Data.Get_transform()
         return self.datas,OE_Data,norm_transform
 class branch_net(nn.Module):
     def __init__(self,input,hidden,output):
