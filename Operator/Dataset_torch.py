@@ -35,7 +35,10 @@ class OE_Dataset(Dataset):
         permute_data=self.data.permute(0,3,1,2)
         # 应用归一化
         #normalized_data = self.norm_transform(permute_data[idx])
-        return permute_data[idx], self.con_tensor[idx,:]
+        ini_data = permute_data[idx,:,1,:] # ini_eta = [b,3,1,300],这里3的0表示x，1表示t，2表示eta
+        ground_truth = permute_data[idx,:,:,:] # ground 
+        
+        return ini_data, self.con_tensor[idx,:],ground_truth
     
     def conditions_to_tensor(self):
        # 假设每个条件都有2个值（A和L）
@@ -178,8 +181,6 @@ class Read_OE_Mat_4torch():
                 self.datas=np.concatenate((self.datas,current_data),axis=0)
                 self.datas=self.datas.reshape(-1,640,300,3)
                 
-
-            
         # dim=[0, 2, 3]告诉PyTorch沿着批次（0维）、高度（2维）、宽度（3维）维
         #返回训练的三个通道（解）的均值和标准差
         mean = self.datas.mean(axis=(0, 1, 2))

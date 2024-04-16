@@ -12,7 +12,7 @@ class Metric():
         mse = np.mean((image1 - image2) ** 2)
         if mse == 0:
             return float('inf')
-        max_pixel = 255.0
+        max_pixel = 1.0
         psnr = 10 * np.log10(max_pixel / np.sqrt(mse))
         return psnr
     @classmethod
@@ -40,7 +40,7 @@ class Global():
     def __init__(self):
         super().__init__()
         self.__Global_dict={
-                    "psnr":[],
+                    "psnr":[], #with different imgs
                     "ssim":[],
                     "mse":[],
                     "notes":"Global performance"}  
@@ -55,10 +55,22 @@ class Global():
 
     def Calulate(self, img1, img2,choose="global")->None:
         
+        image_numbers = img1.shape[0]
+        test_imgs_psnr = []
+        test_imgs_ssim = []
+        test_imgs_mse = []
+
         if choose=="global":
-            self.__Global_dict["psnr"].append ( Metric.calculate_psnr(img1, img2))
-            self.__Global_dict["ssim"].append (Metric.calculate_ssim(img1, img2))
-            self.__Global_dict["mse"].append ( Metric.calculate_mse(img1, img2))
+            
+            for i in range(image_numbers):
+                #这里有小问题，是不是每个都算了
+                test_imgs_psnr.append ( Metric.calculate_psnr(img1[i,:,:], img2[i,:,:]))
+                test_imgs_ssim.append ( Metric.calculate_ssim(img1[i,:,:], img2[i,:,:]))
+                test_imgs_mse.append ( Metric.calculate_mse(img1[i,:,:], img2[i,:,:]))
+                
+            self.__Global_dict["psnr"] .append(np.mean(test_imgs_psnr))
+            self.__Global_dict["ssim"]. append(np.mean(test_imgs_ssim))
+            self.__Global_dict["mse"] .append(np.mean(test_imgs_mse))
 
         elif choose=="local":
                 assert False, "Not implemented"
@@ -85,10 +97,21 @@ class Local():
 
     def Calulate(self, img1, img2,choose="local")->None:
         
+        image_numbers = img1.shape[0]
+        test_imgs_psnr = []
+        test_imgs_ssim = []
+        test_imgs_mse = []
+        print("imag1",img1.shape)
         if choose=="local":
-            self.__Local_dict["psnr"].append ( Metric.calculate_psnr(img1, img2))
-            self.__Local_dict["ssim"].append (Metric.calculate_ssim(img1, img2))
-            self.__Local_dict["mse"].append ( Metric.calculate_mse(img1, img2))
+            for i in range(image_numbers):
+                test_imgs_psnr.append ( Metric.calculate_psnr(img1[i,:,:], img2[i,:,:]))
+                test_imgs_ssim.append (Metric.calculate_ssim(img1[i,:,:], img2[i,:,:]))
+                test_imgs_mse.append ( Metric.calculate_mse(img1[i,:,:], img2[i,:,:]))
+            self. __Local_dict["psnr"].append(np.mean(test_imgs_psnr))
+            self.__Local_dict["ssim"].append(np.mean(test_imgs_ssim))
+            self.__Local_dict["mse"].append(np.mean(test_imgs_mse))
+            
+            
         elif choose=="global":
                 assert False, "Not implemented"            
 
