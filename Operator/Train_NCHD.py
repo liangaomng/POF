@@ -14,6 +14,7 @@ import json
 import shutil
 import utilities3 
 from tqdm import tqdm  # Correct import
+from Dataset_torch import OE_Dataset,Get_4_folder
 
 # from Evaluate import calculate_psnr,calculate_ssim
 class Branch_net(nn.Module):
@@ -40,7 +41,7 @@ class PID_alpha():
     if pid_en ==True:
         self.kp = kp if kp is not None else 0.1
         self.ki = ki if ki is not None else 0.01
-        self.kd = kd if kd is not None else 0.1
+        self.kd = kd if kd is not None else 0.01
     self.alpha = alpha
     self.integral = 0  # 积分项累计
     self.previous_error = 0  # 存储前一次误差，用于计算微分项
@@ -97,10 +98,9 @@ class MFNO(nn.Module):
   
       out = out.unsqueeze(-1)
       out = out.unsqueeze(-1)
-      #([batch, 1, 640, 300])
+      #([batch, 640, 1, 300])
       final_out = trunk_out*out
-      #[batch, 1, 640, 300]
-      final_out = final_out.permute(0,2,1,3)
+
    
       return final_out
   def stat_trunk_params(self):
@@ -111,40 +111,6 @@ class MFNO(nn.Module):
       return self.total_params
       
     
-
-def Get_4_folder(train_np_data,test_np_data,name="NCHD"):
-   # Define your folder name
-  folder_name = f'Data/{name}'+ '_pt'
-   # Check if the folder exists, and if not, create it
-  if not os.path.exists(folder_name):
-      os.makedirs(folder_name)
-      # Define your folder and file name
-  file_name = 'Train_dataset.pt'
-  file_path = os.path.join(folder_name, file_name)
-
-  # Check if the specific file exists in the folder
-  if os.path.isfile(file_path):
-      print(f"The file {file_name} exists in {folder_name}.")
-      train_data = torch.load(f'{folder_name}/Train_dataset.pt')
-      train_dataset = train_data['train_dataset']
-
-      # Load the test dataset
-      test_data = torch.load(f'{folder_name}/Test_dataset.pt')
-      test_dataset = test_data['test_dataset']
-  else:
-      print(f"The file {file_name} does not exist in {folder_name}.")
-      # Save the train dataset and normalization transform
-      torch.save({
-          'train_dataset': train_np_data,
-      }, f'{folder_name}/Train_dataset.pt')
-
-      # Save the test dataset
-      torch.save({
-          'test_dataset': test_np_data
-      }, f'{folder_name}/Test_dataset.pt')
-
-  
-  return train_dataset,test_dataset
        
 def plot_test_performance(folder,epoch,**kwargs):
     #SSIM是基于对亮度、对比度和结构三个不同维度的比较计算得出的。
@@ -153,15 +119,15 @@ def plot_test_performance(folder,epoch,**kwargs):
     
     g_SSIM = kwargs["Global_metric"].Global_dict["ssim"]
     g_PSNR = kwargs["Global_metric"].Global_dict["psnr"]
-    g_MSE = kwargs["Global_metric"].Global_dict["mse"]
+    g_MAPE = kwargs["Global_metric"].Global_dict["mape"]
     
     #local
     l_SSIM = kwargs["Local_metric"].Local_dict["ssim"]
     l_PSNR = kwargs["Local_metric"].Local_dict["psnr"]
-    l_MSE = kwargs["Local_metric"].Local_dict["mse"]
+    l_MAPE = kwargs["Local_metric"].Local_dict["mape"]
     
     #loss
-    training_losses = kwargs["training_losses"]
+
     test_losses = kwargs["test_losses"]
     
     num_points= int (epoch / args.save_epoch) + 1
@@ -185,17 +151,16 @@ def plot_test_performance(folder,epoch,**kwargs):
     ax[1].set_title(f"SSIM_{epoch}_"+kwargs["title"])
     ax[1].legend()
     
-    ax[2].plot(range(num_points),g_MSE, label="Global MSE",linestyle='-',
+    ax[2].plot(range(num_points),g_MAPE, label="Global MAPE",linestyle='-',
                linewidth=3,marker="o")
-    ax[2].plot(range(num_points),l_MSE, label="Local MSE",linestyle='--',
+    ax[2].plot(range(num_points),l_MAPE, label="Local MAPE",linestyle='--',
                linewidth=3,marker="s")
     ax[2].set_yscale('log')
-    ax[2].set_title(f"MSE_{epoch}_"+kwargs["title"])
+    ax[2].set_title(f"MAPE_{epoch}_"+kwargs["title"])
     ax[2].legend()
     
-    ax[3].plot(range(num_points),training_losses, label="Training loss", 
-             linewidth=3,linestyle='-')
-    ax[3].plot(range(num_points),test_losses, label="Test Mean step loss",linewidth=3,
+
+    ax[3].plot(range(num_points),test_losses, label="Test loss",linewidth=3,
              linestyle='--')
     ax[3].legend()
     ax[3].set_yscale('log')
@@ -212,52 +177,52 @@ def test(folder,epoch,test_loader,device):
     with torch.no_grad():
       mse=torch.nn.MSELoss()
       loss=0
-      for i,(data,condition) in enumerate(test_loader):
+      for i,(ini_data,condition,ground_truth) in enumerate(test_loader):
+      
+        condition = condition.to(device)
         
-        # pred_data = np.zeros_like(data.cpu().numpy())
-        # pred_data=torch.from_numpy(pred_data)
-        condition=condition.to(device)
+        ini_data = ini_data.to(device)
+        ground_truth =ground_truth.to(device)
         
-        data=data.to(device)
-        test_data=data
-        t_steps= data.shape[2]-1
+        
+
         #对整个序列做变换
-        ini_data = data[:,2:3,0:1,:] #【20,1,1,300】 #2表示eta的维度
-        ini_data =ini_data .permute(0,2,1,3)#[20,1,3,300】
+        ini_data =ini_data .permute(0,2,1,3)#变成[20,1,3,300】 
+
+        final_out= mNO (ini_data,condition) #[20,3,640,300]
+        loss = mse (final_out[:,:,:,:],ground_truth[:,:,:,:]) # 归一化前算一个loss
         
-  
-        
-        final_out= mFNO (ini_data,condition) #[20,1,640,300]
-        
-        final_out = x_normalizer.decode(final_out)
-        data= x_normalizer.decode(data)
+        # 反归一化
+        final_out =  gt_normalizer.decode(final_out)
+        ground_truth= gt_normalizer.decode(ground_truth)
+      
         
         pred_data =  final_out
         
-        loss = mse (final_out[:,:,:,:],data[:,2:3,:,:])
+        
 
-
+    print("gt",ground_truth.shape) #[b,640,1,300]
     Mean_step_loss= loss.item()
     fig,ax= plt.subplots(1,3,figsize=(12,8))
     #画图预测第一个batch的数据tst_data[0,2,:,:],2表示eta
-    cax1=ax[0].imshow(test_data[0,2,:,:].cpu().numpy(),cmap="jet",vmin=0,vmax=0.05)
+    cax1=ax[0].imshow(ground_truth[0,:,0,:].cpu().numpy(),cmap="jet",vmin=0,vmax=0.05)
   
     ax[0].set_title("True"+f"A_{condition[0,0].item():.2f}"+f"_L_{condition[0,1].item():.2f}") 
-    cax2=ax[1].imshow(pred_data[0,0,:,:].cpu().numpy(),cmap="jet",vmin=0,vmax=0.05)
+    cax2=ax[1].imshow(pred_data[0,:,0,:].cpu().numpy(),cmap="jet",vmin=0,vmax=0.05)
     ax[1].set_title("Pred")
     # Add a colorbar
     fig.colorbar(cax1, fraction=0.03, pad=0.04,orientation='horizontal', location='top')
     fig.colorbar(cax2, fraction=0.03, pad=0.04,orientation='horizontal', location='top')
     #abs
-    cax3=ax[2].imshow(np.abs(test_data[0,2,:,:].cpu().numpy()-pred_data[0,0,:,:].cpu().numpy()),
+    cax3=ax[2].imshow(np.abs(ground_truth[0,:,0,:].cpu().numpy()-pred_data[0,:,0,:].cpu().numpy()),
                       cmap="jet",
                       vmin=0,vmax=0.01)
     fig.colorbar(cax3,fraction=0.03, pad=0.04,orientation='horizontal', location='top')
     ax[2].set_title("Abs error")
     #记录global 误差test_data [batch,3,640,300]，640为时间步
-    global_metric.Calulate(test_data[:,2,:,:].cpu().numpy(),pred_data[:,0,:,:].cpu().numpy())
+    global_metric.Calulate(ground_truth[:,:,0,:].cpu().numpy(),pred_data[:,:,0,:].cpu().numpy())
     #记录local 误差
-    local_metric.Calulate(test_data[:,2,:,100:200].cpu().numpy(),pred_data[:,0,:,100:200].cpu().numpy())
+    local_metric.Calulate(ground_truth[:,:,0,100:200].cpu().numpy(),pred_data[:,:,0,100:200].cpu().numpy())
     
 
 
@@ -304,30 +269,30 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Process some integers.")
   # 添加alpha参数
   parser.add_argument('--accelerator',type = bool,default=False,help="accelerator")
-  parser.add_argument('--alpha', type=float, help='alpha to control global and local weight ')
+  parser.add_argument('--alpha', type = float, help = 'alpha to control global and local weight ')
   # 添加fno mode参数
-  parser.add_argument('--modes', type=int, default=32,help='modes of fno')
+  parser.add_argument('--modes', type = int, default = 32, help='modes of fno')
   # 添加seed参数
-  parser.add_argument('--seed', type=int, default=1234,help='seeds exprs')
+  parser.add_argument('--seed', type = int, default = 1234,help = 'seeds exprs')
   #保存的参数
-  parser.add_argument('--dat', type=str,  required=True,help='description of the exprs and save')
-  parser.add_argument('--data_folder',type=str,default="None",help="Dataset_path")
-  parser.add_argument("--pid",type=str2bool,help="pid effect(默认关闭)")
+  parser.add_argument('--dat', type = str,  required = True,help = 'description of the exprs and save')
+  parser.add_argument('--data_folder',type = str,default="None",help="Dataset_path")
+  parser.add_argument("--pid",type=str2bool,help = "pid effect(默认关闭)")
 
   #记录的epoch
-  parser.add_argument('--save_epoch',type=int,default=2)
+  parser.add_argument('--save_epoch',type = int,default = 1000)
   # 添加可选参数的train
-  Train=parser.add_argument_group('Train',description='Train paremeters')
+  Train=parser.add_argument_group('Train',description = 'Train paremeters')
 
   # 向另一个参数组中添加参数，基本都是默认
-  Train.add_argument('--epoch',type=int,default=5000, help='epoch of train')
-  Train.add_argument('--batch_size',type=int,default=50, help='batch_size of train')
-  Train.add_argument('--lr',type=float,default=1e-3, help='learning rate of train')
+  Train.add_argument('--epoch',type = int,default = 5000, help='epoch of train')
+  Train.add_argument('--batch_size',type = int,default = 500,help='batch_size of train')
+  Train.add_argument('--lr',type = float,default = 1e-3, help = 'learning rate of train')
   Load = False   #默认已经整理好:False
 
   # 解析命令行参数
   args = parser.parse_args()
-  
+  device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
   # 添加位置参数
   if args.pid ==True:
@@ -359,8 +324,8 @@ if __name__ == "__main__":
   shutil.copy("Operator/Train_NCHD.py",f"Model_out/{dat}/Train_NCHD.py")
   model_save_path=f"Model_out/{dat}"
 
-  # 加载 .mat 文件
-  if (Load == False):
+  # 每次加载 .mat 文件 和保存,加大随机性
+  if Load == False:
     All_mat_file= return_name_list(folder=args.data_folder)
     # 打乱文件列表以确保随机性
     np.random.shuffle(All_mat_file)
@@ -373,32 +338,61 @@ if __name__ == "__main__":
     test_files = All_mat_file[train_size:]
 
     #Test_mat_file= return_name_list(folder="Data/Test")
-    train_np_data,train_OE_Data,norm_transform = Read_Mat_4torch(mat_file=train_files)._read_mat()
+    train_torch_data,train_Conditions = Read_Mat_4torch(mat_file=train_files)._read_mat()
 
+    test_torch_data,test_Conditions = Read_Mat_4torch(mat_file=test_files)._read_mat()
+    
+    
+    #归一化输入数据，记得test的时候反归一化，但测试感觉loss下降的差不多
+    print("before_norm",train_torch_data.shape) #norm torch.Size([b, 3,640, 300]) 
 
-    test_np_data,test_OE_Data,norm_transform = Read_Mat_4torch(mat_file=test_files)._read_mat()
+    #***** 维度变化，输入【b,1,1,300】-> 输出[b,640,1,300]
+    #train
+    train_g_t = train_torch_data[:,2:3,:,:]# ground_truth torch.Size([b, 1,640, 300])
+    train_g_t = train_g_t.permute(0,2,1,3) #=[b,640,1,300]
+    
+    train_input_data = train_torch_data[:,2:3,0:1,:] # ini([b, 1,1, 300]) 0:1 is time
+    train_input_data = train_input_data.permute(0,2,1,3) # =[20,1,1,300】时间维度在前面
+    
+    #gaussion Normalizer
+    
+    gt_normalizer = utilities3.UnitGaussianNormalizer(train_g_t)
+    
+    train_g_t = gt_normalizer.encode(train_g_t)
+    
+    input_normalizer = utilities3.UnitGaussianNormalizer(train_input_data)
+    train_input_data = input_normalizer.encode(train_input_data)
+    
+    train_OE_Dataset = OE_Dataset(input_data = train_input_data,
+                                  input_cond = train_Conditions,
+                                  out = train_g_t)
+    # test 
+    test_g_t = test_torch_data[:,2:3,:,:] # ground_truth torch.Size([b, 1,640, 300])
+    test_g_t = test_g_t.permute(0,2,1,3) #[b,640,1,300]
+    test_input_data = test_torch_data[:,2:3,0:1,:] # input_data torch.Size([b, 1,1, 300]) 0:1 is time
+    test_input_data = test_input_data.permute(0,2,1,3) #变成[20,1,1,300】时间维度在前面
+    
+    test_g_t = gt_normalizer.encode(test_g_t) #[batch,640,1,300]
+    test_input_data = input_normalizer.encode(test_input_data)
+    
 
+    test_OE_Dataset = OE_Dataset(input_data = test_input_data,
+                                 input_cond = test_Conditions,
+                                 out = test_g_t)
+    
+    #保存
+    torch.save(train_OE_Dataset, 'Data/NCHD_pt/train_OE_Dataset.pt')
+    torch.save(test_OE_Dataset, 'Data/NCHD_pt/test_OE_Dataset.pt')
   
-  train_OE_Data = None
-  test_OE_Data = None
-  # 读取 .pt
-  train_OE_Data,test_OE_Data = Get_4_folder(train_OE_Data,test_OE_Data)
-  
 
-  #归一化
-  x_normalizer = utilities3.UnitGaussianNormalizer(train_OE_Data)
-  train_OE_Data = x_normalizer.encode(train_OE_Data)
-  test_OE_Data = x_normalizer.encode(test_OE_Data) # 归一化到dataloader
-
-  
-  train_loader = DataLoader(train_OE_Data,batch_size = args.batch_size,shuffle=True)
-  test_loader = DataLoader(test_OE_Data,batch_size=args.batch_size,shuffle=True)
-  
-  #3个channnel 是三个形态
-
-  mFNO = MFNO()
+  #定义模型和相关优化器
+  train_loader = DataLoader(train_OE_Dataset,batch_size = args.batch_size,shuffle=True)
+  test_loader = DataLoader(test_OE_Dataset,batch_size=args.batch_size,shuffle=True)
+  mNO = MFNO()
   mse=torch.nn.MSELoss()
-  optimzer=torch.optim.Adam(mFNO.parameters(),lr=args.lr)
+  optimzer = torch.optim.Adam(mNO.parameters(),lr=args.lr)
+  # 创建学习率调度器
+  scheduler = torch.optim.lr_scheduler.StepLR(optimzer, step_size=100, gamma=0.99)
 
   alpha_list =[]
   losses = [] # 提前分配内存空间
@@ -410,12 +404,17 @@ if __name__ == "__main__":
 
   # 加速
   if (args.accelerator == True):
+    
     print("accelerator")
     from accelerate import Accelerator
-    train_loader, test_loader, mfno,optimzer = accelerator.prepare(train_loader, test_loader, mFNO, optimzer)
+    train_loader, test_loader, mNO,optimzer = accelerator.prepare(train_loader, test_loader, mNO, optimzer)
+    
   else:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    mFNO.to(device)
+    
+    mNO.to(device)
+    gt_normalizer.cuda()
+    input_normalizer.cuda()
+
 
 
 
@@ -428,25 +427,21 @@ if __name__ == "__main__":
       for i, (ini_data, condition,ground_truth) in enumerate(train_loader):
 
         loss = 0.0
-        ini_data = ini_data.to(device) #[batch,3,1,300] 1 is t0
+        ini_data = ini_data #[batch,1,1,300] first1 is time
+        condition = condition#[batch,2(A and L)]
+        ground_truth = ground_truth
+        
 
-        condition=condition.to(device) #[batch,2(A and L)]
-      
-        # ini_data = data[:,2:3,0:1,:] #【20,1,1,300】 #2:3表示eta的维度,0:1 表示时间的维度
-        ini_data =ini_data .permute(0,2,1,3)#[20,1,3,300】#变化后【b,t,coords,3parts】
+        final_out = mNO(ini_data,condition) #should:[20,640,3,300]
         
-        final_out = mFNO(ini_data,condition) #[20,1,640,300]
-        
-        data = x_normalizer.decode(data)
-        final_out = x_normalizer.decode(final_out) #  反归一化
-        print("final_out",final_out.shape) #final_out torch.Size([50, 1, 640, 300])
+
        
         #第2个的维度表示eta 
-        outside_indices_loss = mse(final_out[:, :, :, 0:100], ground_truth) + \
-                              mse(final_out[:, :, :, 200:300], ground_truth)
+        outside_indices_loss = mse(final_out[:, :, :, 0:100], ground_truth[:,:,:,0:100]) + \
+                              mse(final_out[:, :, :, 200:300], ground_truth[:,:,:,200:300])
                           
         # 计算 100:200 区间内的损失贡献 slope
-        slope_loss = mse(final_out[:, :, :, 100:200], ground_truth)
+        slope_loss = mse(final_out[:, :, :, 100:200], ground_truth[:,:,:,100:200])
         
       
         loss = (1-pid_alpha.alpha)*outside_indices_loss +  pid_alpha.alpha * slope_loss
@@ -470,17 +465,19 @@ if __name__ == "__main__":
       losses.append(loss.item())
       epoch_list.append(epoch)
       alpha_list.append(pid_alpha.alpha)
+      # 在每个epoch结束后更新学习率
+      scheduler.step()
 
       if epoch % args.save_epoch == 0 :
         #训练loss
 
         fig,ax = plt.subplots(1,2,figsize=(10,6))
         if args.pid:
-          ax[0].plot(epoch_list, losses, label=f"PID $K_p={pid_alpha.K_p}$,$K_i={pid_alpha.K_i}$,$K_d={pid_alpha.K_d}$")
+          ax[0].plot(epoch_list, losses, label= f"$K_p={pid_alpha.K_p}$,$K_i={pid_alpha.K_i}$,$K_d={pid_alpha.K_d}$")
         else:
           ax[0].plot(epoch_list,losses,label = f"Loss" )
           
-          
+        ax[0].set_yscale('log')
         ax[0].legend(loc= "upper left",fontsize=12)
         ax[0].set_title("train loss with epochs")
         
@@ -496,7 +493,7 @@ if __name__ == "__main__":
         plt.close()
         
         
-        
+  
         test_mean_step_loss,Global_metric,Local_metric = test(
                                                             folder=model_save_path,
                                                             epoch=epoch,
@@ -511,16 +508,15 @@ if __name__ == "__main__":
         else:
           prev_loss= losses[-2]
           
-
         if prev_loss > 1.1 * loss.item() :
           print("save best model",flush=True)
-          torch.save(mFNO.state_dict(), f"{model_save_path}/mfno.pth")
+          torch.save(mNO.state_dict(), f"{model_save_path}/mno_ckpt.pth")
           
         if epoch >0:
           
           plot_test_performance(model_save_path,epoch,
                                 Local_metric=Local_metric,Global_metric=Global_metric,title="Global and Local",
-                                training_losses=losses,test_losses=test_losses)
+                                test_losses=test_losses)
 
       # 保存训练损失和测试损失 npz
       if epoch % args.save_epoch == 0 and epoch != 0:

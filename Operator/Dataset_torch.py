@@ -8,43 +8,90 @@ import re
 import scipy.io
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-from torchvision import transforms
+from tqdm import tqdm  # 导入tqdm
+import os
+
+def Get_4_folder(operation,type,name="NCHD",**kwargs):
+    '''
+    kwargs : torch_data,Conditions
+    operations :str,load or save
+    type:str,train or test
+    '''
+
+    if operation == "load":
+        folder_name = f'Data/{name}' + '_pt'
+        file_name = f'{type}_data.pt'
+        file_path = os.path.join(folder_name, file_name)
+        if os.path.isfile(file_path):
+            print(f"The file {file_name} exists in {folder_name}.")
+            data = torch.load(file_path)
+            dataset = data[f'{type}_dataset']
+            torch_data = dataset["torch_data"]
+        
+            return torch_data
+        else:
+            assert "The file {file_name} does not exist in {folder_name}."
+    
+    elif operation == "save":
+        torch_data = kwargs.get("torch_data")
+        Conditions = kwargs.get("Conditions")
+
+        if torch_data is None or Conditions is None:
+            assert "Missing data: 'torch_data' or 'Conditions' not provided."
+
+        folder_name = f'Data/{name}' + '_pt'
+        file_name = f'{type}_data.pt'
+        file_path = os.path.join(folder_name, file_name)
+        if not os.path.exists(folder_name):
+            os.makedirs(folder_name)
+
+        # Saving only the necessary data
+        data_to_save = {
+            f'{type}_dataset': {
+                "torch_data": torch_data
+            }
+        }
+        torch.save(data_to_save, file_path)
+        print(f"The file {file_name} saved in {folder_name}.")
+
+  
+
 
 
 
 class OE_Dataset(Dataset):
-    def __init__(self, data,condition,task="NCHD",**kwargs):
+    def __init__(self, input_data,input_cond,out,task="NCHD",**kwargs):
       
-        device= torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        self.data = torch.tensor(data,dtype=torch.float32).to(device)
-        self.condition=condition
-         # 实例化NormalizeTransform类
-        self.norm_transform = NormalizeTransform(mean=kwargs['mean'], 
-                                                 std=kwargs['std'])
-        self.task =task
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.input_data = input_data.to(self.device) #[b, 1,1, 300] 时间维度已经在前面
+        self.condition = input_cond
+        self.ground_truth = out.to(self.device)# ground truth
+        self.task = task
+         #这里condition的是A和L 两个条件
+        self.con_tensor=self.conditions_to_tensor()
+    
+       
+        
     def __len__(self):
         
-        return  self.data.shape[0]
+        return  self.input_data.shape[0]
 
     def __getitem__(self, idx):
     
-        #这里condition的是A和L $#注意data (n_files, 640, 300, 3) 
-        self.con_tensor=self.conditions_to_tensor()
-        #permute 成【n_files, 3, 640, 300】
-        permute_data=self.data.permute(0,3,1,2)
-        # 应用归一化
-        #normalized_data = self.norm_transform(permute_data[idx])
-        ini_data = permute_data[idx,:,1,:] # ini_eta = [b,3,1,300],这里3的0表示x，1表示t，2表示eta
-        ground_truth = permute_data[idx,:,:,:] # ground 
+       
+        ini_data = self.input_data[idx] # ini_eta 
+        ground_truth = self.ground_truth[idx]
+        condition = self.con_tensor[idx] # condition,已经进入cuda
+   
         
-        return ini_data, self.con_tensor[idx,:],ground_truth
+        return ini_data,condition,ground_truth
     
     def conditions_to_tensor(self):
        # 假设每个条件都有2个值（A和L）
         if self.task =="NCHD":# 2个条件
             
-            tensor = torch.zeros((len(self.condition), 2), dtype=torch.float32)
+            tensor = torch.zeros((len(self.condition), 2), dtype=torch.float32).to(self.device)
        
         
         for i, (key, value) in enumerate(self.condition.items()):
@@ -52,11 +99,7 @@ class OE_Dataset(Dataset):
             tensor[i, 1] = torch.tensor(value['L'], dtype=torch.float32)  # 第二个值是L
 
         return tensor
-    def Get_transform(self): 
-        return self.norm_transform
-    def Inverse_transform(self,x):
-        
-        return self.norm_transform.inverse(x)
+
 
 # 自定义归一化变换
 class NormalizeTransform:
@@ -87,110 +130,37 @@ class Read_Mat_4torch():
             self.L = np.float32(match.group(2))
             self.CONDITIONS[f"{mat}"]={ "A":self.A,
                                         "L":self.L}
-        print(self.CONDITIONS)
+        
+    def _return_conditions(self):
+        return self.CONDITIONS 
 
     def _read_mat(self):
         
-        for i,mat in enumerate(self.mat_file):
-            print("i",i)
+        files = len(self.mat_file)
+        self.datas= np.zeros((files,640,300,3))
+        
+        for i, mat in tqdm(enumerate(self.mat_file), total=len(self.mat_file), desc="Loading MAT files"):
+            
             self.data = scipy.io.loadmat(mat)
-            #(640,100,3)
             self.wave_data = self.data['wave_data'][0, 0]
-            # 有三段
-            title=["deepsea","slope","normal"]
-            #时间，空间，3 表示x，t，eta(x,y)
-    
-            self.deepsea_data = self.wave_data['deepsea'].reshape(640,100,3).astype(np.float32)
-            self.slope_data =  self.wave_data['slope'].reshape(640,100,3).astype(np.float32)
-            self.normal_data =  self.wave_data['normal'].reshape(640,100,3).astype(np.float32)
-       
-            current_data=np.concatenate((self.deepsea_data,self.slope_data,self.normal_data),axis=1)
 
-            current_data=current_data.reshape(-1,640,300,3) 
+            title = ["deepsea", "slope", "normal"]
 
-            # 不同的文件的维度是[n,640,300,3] 3 是3 个同搭配
+            self.deepsea_data = self.wave_data['deepsea'].reshape(640, 100, 3).astype(np.float32)
+            self.slope_data = self.wave_data['slope'].reshape(640, 100, 3).astype(np.float32)
+            self.normal_data = self.wave_data['normal'].reshape(640, 100, 3).astype(np.float32)
+
+            current_data = np.concatenate((self.deepsea_data, self.slope_data, self.normal_data), axis=1)
+            self.datas[i] = current_data
             
-            if i==0:
-                self.datas=current_data
-                
-            else:
-                print("test", self.datas.shape)
-                
-                self.datas=np.concatenate((self.datas,current_data),axis=0)
-                self.datas=self.datas.reshape(-1,640,300,3)
-                
+            #tqdm.write(f"Processed {i+1}/{len(self.mat_file)} files")
 
-            
-        # dim=[0, 2, 3]告诉PyTorch沿着批次（0维）、高度（2维）、宽度（3维）维
-        #返回训练的三个通道（x,t,eta(x,t)）的均值和标准差
-        mean = self.datas.mean(axis=(0, 1, 2))
-        std = self.datas.std(axis=(0, 1, 2))
+        self.datas = torch.from_numpy(self.datas).float() #转torch
+        self.datas = self.datas.permute(0,3,1,2) # 
+        print("data shape",self.datas.shape)
+  
+        return self.datas,self.CONDITIONS
 
-        OE_Data = OE_Dataset(self.datas,self.CONDITIONS,mean=mean[-1],std=std[-1])
-        norm_transform=OE_Data.Get_transform()
-        
-        return self.datas,OE_Data,norm_transform
-
-class Read_OE_Mat_4torch():
-    def __init__(self, mat_file:list):
-        
-        self.mat_file = mat_file
-        # 正则表达式模式
-        self.CONDITIONS = {}
-        self.datas = None  # 初始化datas为None
-        
-        for i,mat in enumerate(mat_file):
-            print(mat)
-            pattern = r'A_([0-9.]+)_L_([0-9.]+)_dr_([0-9.]+)'
-            # 搜索模式并提取数字
-            match = re.search(pattern, mat)
-            self.A = np.float32(match.group(1))
-            self.L = np.float32(match.group(2))
-            self.dr = np.float32(match.group(3))
-            self.CONDITIONS[f"{mat}"]={ "A":self.A,
-                                        "L":self.L,
-                                        "dr":self.dr}
-        print(self.CONDITIONS)
-
-    def _read_mat(self):
-        
-        for i,mat in enumerate(self.mat_file):
-            print("i",i)
-            self.data = scipy.io.loadmat(mat)
-            #(640,100,3)
-            self.wave_data = self.data['wave_data'][0, 0]
-            # 有三段
-            title=["deepsea","slope","normal"]
-            #时间，空间，3
-            self.deepsea_data = self.wave_data['deepsea'].reshape(640,100,3).astype(np.float32)
-            self.slope_data =  self.wave_data['slope'].reshape(640,100,3).astype(np.float32)
-            self.normal_data =  self.wave_data['normal'].reshape(640,100,3).astype(np.float32)
-       
-            current_data=np.concatenate((self.deepsea_data,self.slope_data,self.normal_data),axis=1)
-
-            current_data=current_data.reshape(-1,640,300,3) 
-
-            # 不同的文件的维度是[n,640,300,3] 3 是3 个同搭配
-            
-            if i==0:
-                self.datas=current_data
-                
-            else:
-                print("test", self.datas.shape)
-                
-                self.datas=np.concatenate((self.datas,current_data),axis=0)
-                self.datas=self.datas.reshape(-1,640,300,3)
-                
-        # dim=[0, 2, 3]告诉PyTorch沿着批次（0维）、高度（2维）、宽度（3维）维
-        #返回训练的三个通道（解）的均值和标准差
-        mean = self.datas.mean(axis=(0, 1, 2))
-        std = self.datas.std(axis=(0, 1, 2))
-        print("mean")
-        print("std")
-        
-        OE_Data = OE_Dataset(self.datas,self.CONDITIONS,mean=mean[-1],std=std[-1],task="NCHD")
-        norm_transform = OE_Data.Get_transform()
-        return self.datas,OE_Data,norm_transform
 class branch_net(nn.Module):
     def __init__(self,input,hidden,output):
         super(branch_net,self).__init__()

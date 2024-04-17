@@ -20,6 +20,7 @@ $$ \eta(x,t_{0:99},C) = Brann(A,L) \circ  G(*,t_{0},C)$$
 
 The model‘ output is [640，100，3], the input is [1,100,3]
 
+
 ### there is two types of tasks , one is the meeting of NCHD  
 
     For  NCHD DATA:     
@@ -33,6 +34,9 @@ You could put the data and release them in Data/Trian/Train_1d
 ```python
 bash Shell/meeting/modes_128_1d/3_19_1.sh
 ```
+And it could be shown like this, it will be successful:
+
+<img src="Description/Load.png" alt="img" style="zoom:50%;" />
 
 ### As for result, you could see the result for epoch =0 
 #### epoch=0

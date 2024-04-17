@@ -21,6 +21,11 @@ class Metric():
         mse = np.mean((image1 - image2) ** 2)
         return mse
     
+    @classmethod
+    def calculate_mape(cls,image1,image2)->float:
+        epsilon = 1e-8  # Small constant to avoid division by zero
+        mape = np.mean(np.abs((image1 - image2) / (np.abs(image1) + epsilon))) * 100
+        return mape
     
     @classmethod
     def calculate_ssim(cls,image1, image2)->float:
@@ -42,7 +47,7 @@ class Global():
         self.__Global_dict={
                     "psnr":[], #with different imgs
                     "ssim":[],
-                    "mse":[],
+                    "mape":[],
                     "notes":"Global performance"}  
 
     @property  
@@ -58,7 +63,7 @@ class Global():
         image_numbers = img1.shape[0]
         test_imgs_psnr = []
         test_imgs_ssim = []
-        test_imgs_mse = []
+        test_imgs_mape = []
 
         if choose=="global":
             
@@ -66,11 +71,12 @@ class Global():
                 #这里有小问题，是不是每个都算了
                 test_imgs_psnr.append ( Metric.calculate_psnr(img1[i,:,:], img2[i,:,:]))
                 test_imgs_ssim.append ( Metric.calculate_ssim(img1[i,:,:], img2[i,:,:]))
-                test_imgs_mse.append ( Metric.calculate_mse(img1[i,:,:], img2[i,:,:]))
+            
+                test_imgs_mape.append ( Metric.calculate_mape(img1, img2))
                 
             self.__Global_dict["psnr"] .append(np.mean(test_imgs_psnr))
             self.__Global_dict["ssim"]. append(np.mean(test_imgs_ssim))
-            self.__Global_dict["mse"] .append(np.mean(test_imgs_mse))
+            self.__Global_dict["mape"] .append(np.mean(test_imgs_mape))
 
         elif choose=="local":
                 assert False, "Not implemented"
@@ -84,7 +90,7 @@ class Local():
         self.__Local_dict={
                     "psnr":[],
                     "ssim":[],
-                    "mse":[],
+                    "mape":[],
                     "notes":"Lobal performance"}  
 
     @property  
@@ -100,16 +106,16 @@ class Local():
         image_numbers = img1.shape[0]
         test_imgs_psnr = []
         test_imgs_ssim = []
-        test_imgs_mse = []
+        test_imgs_mape = []
         print("imag1",img1.shape)
         if choose=="local":
             for i in range(image_numbers):
                 test_imgs_psnr.append ( Metric.calculate_psnr(img1[i,:,:], img2[i,:,:]))
                 test_imgs_ssim.append (Metric.calculate_ssim(img1[i,:,:], img2[i,:,:]))
-                test_imgs_mse.append ( Metric.calculate_mse(img1[i,:,:], img2[i,:,:]))
+                test_imgs_mape.append ( Metric.calculate_mape(img1, img2))
             self. __Local_dict["psnr"].append(np.mean(test_imgs_psnr))
             self.__Local_dict["ssim"].append(np.mean(test_imgs_ssim))
-            self.__Local_dict["mse"].append(np.mean(test_imgs_mse))
+            self.__Local_dict["mape"].append(np.mean(test_imgs_mape))
             
             
         elif choose=="global":
