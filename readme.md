@@ -1,12 +1,12 @@
 
-## There are the description for operator learning TASKS <img src="show.png" alt="img" style="zoom:30%;" />
+## There are the description for operator learning TASKS <img src="Description/show.png" alt="img" style="zoom:10%;" />
 
-![Alt text](test.gif)
+![Alt text](Description/test.gif)
 
 ### what is the model's input and outputs?
 
 Here we use the Operator learning, the operator learns a mapping from a $ \eta (x_{0},t_{0}) -> \eta (x,t) $, the $x_{0}$ is a type of image  about (100,3), which means that 100 is the discrete elements in 3 type area. $t_{0}$ is the 1 which means that the initial step in the simulation.
-Therefore, we train the opertor $G(*,t,C_{i})$, which has a mapping relationship as followng, $C_{i}$ means the 3 type area:
+Therefore, we train the opertor $G(*,t,C_{i})$, which has a mapping relationship as followng, $C_{i}$ means the 3 type area:s
 
 $$\eta (x_{0:99},t_{0},C_{i}) \overset{G}{\rightarrow} \eta (x_{0:99},t,C_{i}),t\in [0,639] , i \in [0,2]$$ 
 
@@ -40,9 +40,9 @@ And it could be shown like this, it will be successful:
 
 ### As for result, you could see the result for epoch =0 
 #### epoch=0
-<img src="test0.png" alt="img" style="zoom:50%;" />
+<img src="Description/test0.png" alt="img" style="zoom:50%;" />
 
 
 #### epoch=2000
-<img src="test2000.png" alt="img" style="zoom:50%;" />
+<img src="Description/test2000.png" alt="img" style="zoom:50%;" />
 

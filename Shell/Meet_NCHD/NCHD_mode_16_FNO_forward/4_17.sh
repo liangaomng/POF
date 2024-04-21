@@ -9,7 +9,7 @@ seed_values=(10 100 200)
 trunk_net=fno 
 # Set other parameters
 modes=16
-base_dat="Data_Expr_NCHD/4_17_expr_"
+base_dat="Data_Expr_NCHD/4_17_expr"
 Train_epoch=11000
 expr_order=1
 Data_set="Data/Train/NCHD"

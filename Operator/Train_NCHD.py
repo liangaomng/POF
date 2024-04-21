@@ -307,7 +307,7 @@ if __name__ == "__main__":
   num_epochs= args.epoch  # 训练 epcoh
 
   set_seed(args.seed)
-  dat = args.dat
+  dat = args.dats
   
   # 将args对象转换为字典
   args_dict = vars(args)
