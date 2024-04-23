@@ -1,6 +1,10 @@
 from functools import reduce
 from functools import partial
 import torch 
+
+import operator
+from functools import reduce
+from functools import partial
 # normalization, pointwise gaussian
 class UnitGaussianNormalizer(object):
     def __init__(self, x, eps=0.00001):

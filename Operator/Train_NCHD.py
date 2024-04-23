@@ -15,7 +15,83 @@ import shutil
 import utilities3 
 from tqdm import tqdm  # Correct import
 from Dataset_torch import OE_Dataset,Get_4_folder
+from wavelet_convolution import WaveConv2d
+import torch.nn.functional as F
+class WNO2d(nn.Module):
+    def __init__(self, width, level, layers, size, wavelet, in_channel, grid_range, padding=0,out=1):
+        super(WNO2d, self).__init__()
 
+        """
+        The WNO network. It contains l-layers of the Wavelet integral layer.
+        1. Lift the input using v(x) = self.fc0 .
+        2. l-layers of the integral operators v(j+1)(x,y) = g(K.v + W.v)(x,y).
+            --> W is defined by self.w; K is defined by self.conv.
+        3. Project the output of last layer using self.fc1 and self.fc2.
+        
+        Input : 3-channel tensor, Initial input and location (a(x,y), x,y)
+              : shape: (batchsize * x=width * x=height * c=3)
+        Output: Solution of a later timestep (u(x,y))
+              : shape: (batchsize * x=width * x=height * c=1)
+        
+        Input parameters:
+        -----------------
+        width : scalar, lifting dimension of input
+        level : scalar, number of wavelet decomposition
+        layers: scalar, number of wavelet kernel integral blocks
+        size  : list with 2 elements (for 2D), image size
+        wavelet: string, wavelet filter
+        in_channel: scalar, channels in input including grid
+        grid_range: list with 2 elements (for 2D), right supports of 2D domain
+        padding   : scalar, size of zero padding
+        """
+
+        self.level = level
+        self.width = width
+        self.layers = layers
+        self.size = size
+        self.wavelet = wavelet
+        self.in_channel = in_channel
+        self.grid_range = grid_range 
+        self.padding = padding
+        
+        self.conv = nn.ModuleList()
+        self.w = nn.ModuleList()
+        
+        self.fc0 = nn.Linear(self.in_channel, self.width) # input channel is 3: (a(x, y), x, y)
+        for i in range( self.layers ):
+            self.conv.append( WaveConv2d(self.width, self.width, self.level, self.size, self.wavelet) )
+            self.w.append( nn.Conv2d(self.width, self.width, 1) )
+        self.fc1 = nn.Linear(self.width, 128)
+        self.fc2 = nn.Linear(128, out)
+
+    def forward(self, x):
+        grid = self.get_grid(x.shape, x.device)
+        x = torch.cat((x, grid), dim=-1)    
+        x = self.fc0(x)                      # Shape: Batch * x * y * Channel
+        x = x.permute(0, 3, 1, 2)            # Shape: Batch * Channel * x * y
+        if self.padding != 0:
+            x = F.pad(x, [0,self.padding, 0,self.padding]) 
+        
+        for index, (convl, wl) in enumerate( zip(self.conv, self.w) ):
+            x = convl(x) + wl(x) 
+            if index != self.layers - 1:     # Final layer has no activation    
+                x = F.mish(x)                # Shape: Batch * Channel * x * y
+                
+        if self.padding != 0:
+            x = x[..., :-self.padding, :-self.padding]     
+        x = x.permute(0, 2, 3, 1)            # Shape: Batch * x * y * Channel
+        x = F.gelu( self.fc1(x) )            # Shape: Batch * x * y * Channel
+        x = self.fc2(x)                      # Shape: Batch * x * y * Channel
+        return x
+    
+    def get_grid(self, shape, device):
+        # The grid of the solution
+        batchsize, size_x, size_y = shape[0], shape[1], shape[2]
+        gridx = torch.tensor(np.linspace(0, self.grid_range[0], size_x), dtype=torch.float)
+        gridx = gridx.reshape(1, size_x, 1, 1).repeat([batchsize, 1, size_y, 1])
+        gridy = torch.tensor(np.linspace(0, self.grid_range[1], size_y), dtype=torch.float)
+        gridy = gridy.reshape(1, 1, size_y, 1).repeat([batchsize, size_x, 1, 1])
+        return torch.cat((gridx, gridy), dim=-1).to(device)
 # from Evaluate import calculate_psnr,calculate_ssim
 class Branch_net(nn.Module):
     def __init__(self,input,hidden,output):
@@ -71,28 +147,49 @@ class MFNO(nn.Module):
   def __init__(self,infeature=2,Trunk="FNO",t_steps=640):
       super(MFNO,self).__init__()
       self.bran_nn = Branch_net(infeature,50,1)
-      if Trunk == "FNO":
+      self.Trunk = Trunk
+      if self.Trunk  == "FNO":
+        #modes64 的参数量 2605052
+        print("FNO")
         self.trunk_nn = FNO(n_modes=(fno_modes,fno_modes),hidden_channels=12,in_channels=1,out_channels=t_steps)
         
-      elif Trunk == "UNO":
-        self.trunk_nn = UNO(model = UNO(in_channels=1,out_channels=t_steps, hidden_channels=12, projection_channels=12,uno_out_channels = [32,64,64,64,32], \
-            uno_n_modes= [[fno_modes,fno_modes],[fno_modes//2,fno_modes//2],[fno_modes//2,fno_modes//2],[fno_modes//2,fno_modes//2],[fno_modes,fno_modes]], uno_scalings=  [[1.0,1.0],[0.5,0.5],[1,1],[2,2],[1,1]],\
-            horizontal_skips_map = None, n_layers = 5, domain_padding = 0.2))
+      elif self.Trunk  == "UNO":
+        print("UNO")
+        #modes64 的参数量 2656746
+        self.trunk_nn = UNO(1,640, hidden_channels=10, projection_channels=12,uno_out_channels = [8,16,16,16,8], \
+            uno_n_modes= [[fno_modes,fno_modes],[32,32],[32,32],[32,32],[fno_modes,fno_modes]], uno_scalings=  [[1.0,1.0],[0.5,0.5],[1,1],[2,2],[1,1]],\
+            horizontal_skips_map = None, n_layers = 5, domain_padding = 1)
         
-      elif Trunk == "WNO":
-        assert "This assertion is not implemented" 
+      elif self.Trunk  == "WNO":
+        h = 2 # dwt需要偶数
+        s = 300
+        print("wno")
+        layers = 6 #level = 2 , 2606035 参数量 fno modes为分解的level：1/2/3/4 out is tsteps
+        self.trunk_nn = WNO2d(width= 14, level = fno_modes, layers = layers , size=[h,s], wavelet='db6',
+              in_channel = 3, grid_range=[1,1], padding=0,out=640).to(device) #实际输出【1，1，3，640】
+        #输入[1, 1,1, 300]输出[1,640,1,300]
+        
       
       self.condition_norm = nn.BatchNorm1d(infeature)  # 归一化层
       self.ini_norm = nn.BatchNorm2d(1)
 
   def forward(self,x,condition):
       #对序列进行fno
-      #[batch,1,3,300]
+      # input:[batch,1,1,300], irst 1 is time
       x_norm =self.ini_norm(x)
-
       condition_normal= self.condition_norm(condition)
       #norm
-      trunk_out = self.trunk_nn(x_norm) #[4, 3, 640, 300]，640是时间步
+      if (self.Trunk  == "WNO"):
+        #wno输入应该是【b，1，300，1】#time 放最后
+        x_norm = x_norm.permute(0,2,3,1)
+        trunk_out = self.trunk_nn(x_norm)
+        #note： wno 去掉一个维度,因为输入得是偶数
+        trunk_out = trunk_out[:,0:1,:,:] #[b,1,300.640]
+        trunk_out =trunk_out.permute(0,3,1,2)#out [b,640,3,300]
+      else:
+        
+         trunk_out = self.trunk_nn(x_norm) #[b, 640, 3, 300]，640是时间步
+        
       
       out = self.bran_nn(condition_normal)
   
@@ -184,7 +281,6 @@ def test(folder,epoch,test_loader,device):
         ini_data = ini_data.to(device)
         ground_truth =ground_truth.to(device)
         
-        
 
         #对整个序列做变换
         ini_data =ini_data .permute(0,2,1,3)#变成[20,1,3,300】 
@@ -204,7 +300,7 @@ def test(folder,epoch,test_loader,device):
     print("gt",ground_truth.shape) #[b,640,1,300]
     Mean_step_loss= loss.item()
     fig,ax= plt.subplots(1,3,figsize=(12,8))
-    #画图预测第一个batch的数据tst_data[0,2,:,:],2表示eta
+    #画图预测第一个batch表示eta
     cax1=ax[0].imshow(ground_truth[0,:,0,:].cpu().numpy(),cmap="jet",vmin=0,vmax=0.05)
   
     ax[0].set_title("True"+f"A_{condition[0,0].item():.2f}"+f"_L_{condition[0,1].item():.2f}") 
@@ -278,6 +374,7 @@ if __name__ == "__main__":
   parser.add_argument('--dat', type = str,  required = True,help = 'description of the exprs and save')
   parser.add_argument('--data_folder',type = str,default="None",help="Dataset_path")
   parser.add_argument("--pid",type=str2bool,help = "pid effect(默认关闭)")
+  parser.add_argument("--Trunk",type = str, required = True, help="trunk net")
 
   #记录的epoch
   parser.add_argument('--save_epoch',type = int,default = 1000)
@@ -301,13 +398,13 @@ if __name__ == "__main__":
   pid_alpha = PID_alpha(alpha = args.alpha,pid_en=args.pid)
     
   
-  fno_modes= args.modes
+  fno_modes= args.modes #for wno is level 1/2/3/4
   
   seed = args.seed
   num_epochs= args.epoch  # 训练 epcoh
 
   set_seed(args.seed)
-  dat = args.dats
+  dat = args.dat
   
   # 将args对象转换为字典
   args_dict = vars(args)
@@ -388,7 +485,7 @@ if __name__ == "__main__":
   #定义模型和相关优化器
   train_loader = DataLoader(train_OE_Dataset,batch_size = args.batch_size,shuffle=True)
   test_loader = DataLoader(test_OE_Dataset,batch_size=args.batch_size,shuffle=True)
-  mNO = MFNO()
+  mNO = MFNO(Trunk=args.Trunk)
   mse=torch.nn.MSELoss()
   optimzer = torch.optim.Adam(mNO.parameters(),lr=args.lr)
   # 创建学习率调度器
@@ -442,6 +539,7 @@ if __name__ == "__main__":
                           
         # 计算 100:200 区间内的损失贡献 slope
         slope_loss = mse(final_out[:, :, :, 100:200], ground_truth[:,:,:,100:200])
+
         
       
         loss = (1-pid_alpha.alpha)*outside_indices_loss +  pid_alpha.alpha * slope_loss
