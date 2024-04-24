@@ -54,10 +54,6 @@ def Get_4_folder(operation,type,name="NCHD",**kwargs):
         torch.save(data_to_save, file_path)
         print(f"The file {file_name} saved in {folder_name}.")
 
-  
-
-
-
 
 class OE_Dataset(Dataset):
     def __init__(self, input_data,input_cond,out,task="NCHD",**kwargs):
@@ -138,26 +134,31 @@ class Read_Mat_4torch():
         
         files = len(self.mat_file)
         self.datas= np.zeros((files,640,300,3))
-        
-        for i, mat in tqdm(enumerate(self.mat_file), total=len(self.mat_file), desc="Loading MAT files"):
+        title = ["deepsea", "slope", "normal"]
+
+        #for i, mat in tqdm(enumerate(self.mat_file), total=len(self.mat_file), desc="Loading MAT files"):
+        for i, mat in (enumerate(self.mat_file[:10])):
+            try:
+                self.data = scipy.io.loadmat(mat)
+                self.wave_data = self.data['wave_data'][0, 0]
+
+               
+                self.deepsea_data = self.wave_data['deepsea'].reshape(640, 100, 3).astype(np.float32)
+                self.slope_data = self.wave_data['slope'].reshape(640, 100, 3).astype(np.float32)
+                self.normal_data = self.wave_data['normal'].reshape(640, 100, 3).astype(np.float32)
+
+                current_data = np.concatenate((self.deepsea_data, self.slope_data, self.normal_data), axis=1)
+                self.datas[i] = current_data
+                print(i,flush=True)
+            except Exception as e:
+                print(f"Failed to load data from {mat}: {e}")
+                
+          
             
-            self.data = scipy.io.loadmat(mat)
-            self.wave_data = self.data['wave_data'][0, 0]
-
-            title = ["deepsea", "slope", "normal"]
-
-            self.deepsea_data = self.wave_data['deepsea'].reshape(640, 100, 3).astype(np.float32)
-            self.slope_data = self.wave_data['slope'].reshape(640, 100, 3).astype(np.float32)
-            self.normal_data = self.wave_data['normal'].reshape(640, 100, 3).astype(np.float32)
-
-            current_data = np.concatenate((self.deepsea_data, self.slope_data, self.normal_data), axis=1)
-            self.datas[i] = current_data
-            
-            #tqdm.write(f"Processed {i+1}/{len(self.mat_file)} files")
-
+         #tqdm.write(f"Processed {i+1}/{len(self.mat_file)} files")
+        print("data shape",self.datas.shape,flush=True)
         self.datas = torch.from_numpy(self.datas).float() #转torch
         self.datas = self.datas.permute(0,3,1,2) # 
-        print("data shape",self.datas.shape)
   
         return self.datas,self.CONDITIONS
 

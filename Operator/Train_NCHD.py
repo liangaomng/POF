@@ -161,7 +161,7 @@ class MFNO(nn.Module):
             horizontal_skips_map = None, n_layers = 5, domain_padding = 1)
         
       elif self.Trunk  == "WNO":
-        h = 2 # dwt需要偶数
+        h = 2 # dwt需要偶数 
         s = 300
         print("wno")
         layers = 6 #level = 2 , 2606035 参数量 fno modes为分解的level：1/2/3/4 out is tsteps
@@ -477,10 +477,11 @@ if __name__ == "__main__":
                                  input_cond = test_Conditions,
                                  out = test_g_t)
     
-    #保存
-    torch.save(train_OE_Dataset, 'Data/NCHD_pt/train_OE_Dataset.pt')
-    torch.save(test_OE_Dataset, 'Data/NCHD_pt/test_OE_Dataset.pt')
+    # #保存
+    # torch.save(train_OE_Dataset, 'Data/NCHD_pt/train_OE_Dataset.pt')
+    # torch.save(test_OE_Dataset, 'Data/NCHD_pt/test_OE_Dataset.pt')
   
+  print("test",flush=True)
 
   #定义模型和相关优化器
   train_loader = DataLoader(train_OE_Dataset,batch_size = args.batch_size,shuffle=True)
@@ -501,18 +502,16 @@ if __name__ == "__main__":
 
   # 加速
   if (args.accelerator == True):
-    
-    print("accelerator")
-    from accelerate import Accelerator
-    train_loader, test_loader, mNO,optimzer = accelerator.prepare(train_loader, test_loader, mNO, optimzer)
+    pass
+    # print("accelerator")
+    # from accelerate import Accelerator
+    # train_loader, test_loader, mNO,optimzer = accelerator.prepare(train_loader, test_loader, mNO, optimzer)
     
   else:
     
     mNO.to(device)
     gt_normalizer.cuda()
     input_normalizer.cuda()
-
-
 
 
   for epoch in range(num_epochs):

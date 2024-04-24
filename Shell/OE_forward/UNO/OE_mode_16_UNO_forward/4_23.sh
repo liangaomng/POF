@@ -1,9 +1,9 @@
 
 # Array of alpha values
-alpha_values=(0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9)
+alpha_values=(0.1)
 
 # Array of seed values
-seed_values=(10 100 200)
+seed_values=(10)
 
 # trunk_net
 trunk_nets=(UNO) 
@@ -19,6 +19,7 @@ Data_set="Data/Train/NCHD"
 for trunk_net in "${trunk_nets[@]}"
 do
   echo "trunk_net=${trunk_net}"
+  echo "当前日期和时间：$(date +"%Y-%m-%d %H:%M:%S")"
   for alpha in "${alpha_values[@]}"
   do
     # Loop over each seed value
