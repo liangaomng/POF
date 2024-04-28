@@ -17,6 +17,7 @@ from tqdm import tqdm  # Correct import
 from Dataset_torch import OE_Dataset,Get_4_folder
 from wavelet_convolution import WaveConv2d
 import torch.nn.functional as F
+
 class WNO2d(nn.Module):
     def __init__(self, width, level, layers, size, wavelet, in_channel, grid_range, padding=0,out=1):
         super(WNO2d, self).__init__()
@@ -92,7 +93,7 @@ class WNO2d(nn.Module):
         gridy = torch.tensor(np.linspace(0, self.grid_range[1], size_y), dtype=torch.float)
         gridy = gridy.reshape(1, 1, size_y, 1).repeat([batchsize, size_x, 1, 1])
         return torch.cat((gridx, gridy), dim=-1).to(device)
-# from Evaluate import calculate_psnr,calculate_ssim
+
 class Branch_net(nn.Module):
     def __init__(self,input,hidden,output):
         super(Branch_net,self).__init__()
@@ -144,7 +145,7 @@ class PID_alpha():
 
 class MFNO(nn.Module):
   
-  def __init__(self,infeature=2,Trunk="FNO",t_steps=640):
+  def __init__(self,infeature=2,Trunk="FNO",t_steps=640,wavelet="db6"):
       super(MFNO,self).__init__()
       self.bran_nn = Branch_net(infeature,50,1)
       self.Trunk = Trunk
@@ -164,8 +165,9 @@ class MFNO(nn.Module):
         h = 2 # dwt需要偶数 
         s = 300
         print("wno")
+      
         layers = 6 #level = 2 , 2606035 参数量 fno modes为分解的level：1/2/3/4 out is tsteps
-        self.trunk_nn = WNO2d(width= 14, level = fno_modes, layers = layers , size=[h,s], wavelet='db6',
+        self.trunk_nn = WNO2d(width= 6, level = fno_modes, layers = layers , size=[h,s], wavelet= wavelet,
               in_channel = 3, grid_range=[1,1], padding=0,out=640).to(device) #实际输出【1，1，3，640】
         #输入[1, 1,1, 300]输出[1,640,1,300]
         
@@ -375,6 +377,7 @@ if __name__ == "__main__":
   parser.add_argument('--data_folder',type = str,default="None",help="Dataset_path")
   parser.add_argument("--pid",type=str2bool,help = "pid effect(默认关闭)")
   parser.add_argument("--Trunk",type = str, required = True, help="trunk net")
+  parser.add_argument("--wavelet",type=str,default="db6",help="wavelet func")
 
   #记录的epoch
   parser.add_argument('--save_epoch',type = int,default = 1000)
@@ -441,7 +444,7 @@ if __name__ == "__main__":
     
     
     #归一化输入数据，记得test的时候反归一化，但测试感觉loss下降的差不多
-    print("before_norm",train_torch_data.shape) #norm torch.Size([b, 3,640, 300]) 
+    print("before_norm",train_torch_data.shape,flush=True) #norm torch.Size([b, 3,640, 300]) 
 
     #***** 维度变化，输入【b,1,1,300】-> 输出[b,640,1,300]
     #train
@@ -459,7 +462,7 @@ if __name__ == "__main__":
     
     input_normalizer = utilities3.UnitGaussianNormalizer(train_input_data)
     train_input_data = input_normalizer.encode(train_input_data)
-    
+
     train_OE_Dataset = OE_Dataset(input_data = train_input_data,
                                   input_cond = train_Conditions,
                                   out = train_g_t)
@@ -472,7 +475,6 @@ if __name__ == "__main__":
     test_g_t = gt_normalizer.encode(test_g_t) #[batch,640,1,300]
     test_input_data = input_normalizer.encode(test_input_data)
     
-
     test_OE_Dataset = OE_Dataset(input_data = test_input_data,
                                  input_cond = test_Conditions,
                                  out = test_g_t)
@@ -486,7 +488,8 @@ if __name__ == "__main__":
   #定义模型和相关优化器
   train_loader = DataLoader(train_OE_Dataset,batch_size = args.batch_size,shuffle=True)
   test_loader = DataLoader(test_OE_Dataset,batch_size=args.batch_size,shuffle=True)
-  mNO = MFNO(Trunk=args.Trunk)
+  
+  mNO = MFNO(Trunk=args.Trunk,wavelet=args.wavelet)
   mse=torch.nn.MSELoss()
   optimzer = torch.optim.Adam(mNO.parameters(),lr=args.lr)
   # 创建学习率调度器
@@ -530,8 +533,6 @@ if __name__ == "__main__":
 
         final_out = mNO(ini_data,condition) #should:[20,640,3,300]
         
-
-       
         #第2个的维度表示eta 
         outside_indices_loss = mse(final_out[:, :, :, 0:100], ground_truth[:,:,:,0:100]) + \
                               mse(final_out[:, :, :, 200:300], ground_truth[:,:,:,200:300])
@@ -556,7 +557,7 @@ if __name__ == "__main__":
         optimzer.step()
 
         pbar.update(1)
-      
+    
       print(f"epoch:{epoch},train_loss:{loss}",flush=True)
       
       losses.append(loss.item())
@@ -600,12 +601,10 @@ if __name__ == "__main__":
         
                                                     
         test_losses.append( test_mean_step_loss )
-        if epoch == 0:
-          prev_loss= losses[-1]
-        else:
-          prev_loss= losses[-2]
-          
-        if prev_loss > 1.1 * loss.item() :
+    
+        prev_loss= losses[-1]
+     
+        if prev_loss > 1.05 * loss.item() :
           print("save best model",flush=True)
           torch.save(mNO.state_dict(), f"{model_save_path}/mno_ckpt.pth")
           

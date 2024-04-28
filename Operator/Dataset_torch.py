@@ -66,8 +66,8 @@ class OE_Dataset(Dataset):
         self.task = task
          #这里condition的是A和L 两个条件
         self.con_tensor=self.conditions_to_tensor()
+     
     
-       
         
     def __len__(self):
         
@@ -136,8 +136,7 @@ class Read_Mat_4torch():
         self.datas= np.zeros((files,640,300,3))
         title = ["deepsea", "slope", "normal"]
 
-        #for i, mat in tqdm(enumerate(self.mat_file), total=len(self.mat_file), desc="Loading MAT files"):
-        for i, mat in (enumerate(self.mat_file[:10])):
+        for i, mat in tqdm(enumerate(self.mat_file), total=len(self.mat_file), desc="Loading MAT files"):
             try:
                 self.data = scipy.io.loadmat(mat)
                 self.wave_data = self.data['wave_data'][0, 0]
@@ -149,9 +148,9 @@ class Read_Mat_4torch():
 
                 current_data = np.concatenate((self.deepsea_data, self.slope_data, self.normal_data), axis=1)
                 self.datas[i] = current_data
-                print(i,flush=True)
+
             except Exception as e:
-                print(f"Failed to load data from {mat}: {e}")
+                tqdm.write(f"Failed to load data from {mat}: {e}")
                 
           
             

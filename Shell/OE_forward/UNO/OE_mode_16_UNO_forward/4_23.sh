@@ -1,9 +1,9 @@
 
 # Array of alpha values
-alpha_values=(0.1)
+alpha_values=(0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9)
 
 # Array of seed values
-seed_values=(10)
+seed_values=(10 100 200)
 
 # trunk_net
 trunk_nets=(UNO) 

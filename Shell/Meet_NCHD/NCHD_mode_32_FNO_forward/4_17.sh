@@ -6,7 +6,7 @@ alpha_values=(0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9)
 seed_values=(10 100 200)
 
 # trunk_net
-trunk_net=fno 
+trunk_net=FNO 
 # Set other parameters
 modes=32
 base_dat="Data_Expr_NCHD/4_17_expr_"
@@ -35,7 +35,7 @@ do
     # Run the Python script with the current set of parameters
     #python Operator/Train_NCHD.py --alpha $alpha --modes $modes --seed $seed --dat $dat --epoch $Train_epoch --data_folder $Data_set
    
-    python Operator/Train_NCHD.py  --alpha $alpha --modes $modes --seed $seed --dat $dat --epoch $Train_epoch --data_folder $Data_set --pid $pid_en
+    python Operator/Train_NCHD.py  -Trunk $trunk_net --alpha $alpha --modes $modes --seed $seed --dat $dat --epoch $Train_epoch --data_folder $Data_set --pid $pid_en
     
     pid_en=yes
     dat="${base_dat}alpha_${alpha}_seed_${seed}pid_${pid_en}"
