@@ -1,0 +1,18 @@
+{
+    "seed": 1,
+    "gamma": 0,
+    "lambda": 1000,
+    "bound": [
+        [
+            0.009,
+            0.011
+        ],
+        [
+            0.99,
+            10
+        ]
+    ],
+    "num_particles": 3000,
+    "dimensions": 2,
+    "iterations": 100
+}

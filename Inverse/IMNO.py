@@ -2,9 +2,10 @@
 import torch
 import os
 import argparse
+from matplotlib.lines import Line2D
 from neuralop.models import FNO
 from torch import nn
-
+import json
 import matplotlib.pyplot as plt
 import numpy as np
 from IPython.display import clear_output
@@ -23,6 +24,11 @@ class Branch_net(nn.Module):
     def forward(self,x):
         out=self._net(x)
         return out
+     
+def to_numpy(tensor):
+    """Ensure tensor is detached and moved to CPU if needed before converting to NumPy array."""
+    return tensor.detach().cpu().numpy() if tensor.is_cuda else tensor.detach().numpy()
+
 
 class MFNO(nn.Module):
   
@@ -85,22 +91,33 @@ class MFNO(nn.Module):
 class Expr_Inverse():
    
    def __init__(self,
+                device_set,
                 save_name,
                 config:dict,
                 net,
                 ini,
                 eta,
-                true_x):
+                true_x, 
+                **kwargs):
   
+
+      self.decoder = kwargs.get("norm_decoder", None)
+      self.decoder.cuda()
       net_dict = torch.load(net)#map_location=torch.device('cpu')
       self.net = MFNO()
       self.net.load_state_dict(net_dict)
-      self.net =self.net.to("cuda")
+      self.net =self.net.to(device_set)
+      self.save_name = save_name
       #######
-    
+      set_seed(config["seed"])
+
       self.branch_net = self.net.bran_nn
       self.trunk_net = self.net.trunk_nn
       self.config = config
+
+      # self.trunk_net 是你想要冻结的网络部分
+      for param in self.trunk_net.parameters():
+         param.requires_grad = False
 
            
       self.eta = eta #[1,640,1,300]
@@ -116,84 +133,80 @@ class Expr_Inverse():
       dimensions = self.config["dimensions"]
       self.bounds = self.config["bound"] # [(0,0.1),(1,5)]
       #为0 
-      self.x = torch.empty(self.num_particles, dimensions).to("cuda")
-      self.v = torch.zeros(self.num_particles, dimensions).to("cuda")
+      self.x = torch.zeros(self.num_particles, dimensions).to(device_set)
+      self.v = torch.zeros(self.num_particles, dimensions).to(device_set)
       self.mse_loss = nn.MSELoss(reduction='none')
       
         
-      # 初始化位置
+      #初始化位置
       for dim in range(dimensions):
-         self.x[:, dim] = torch.rand(self.num_particles) * (self.bounds[dim][1] - self.bounds[dim][0]) + self.bounds[dim][0]
+        self.x[:, dim] = torch.rand(self.num_particles) * (self.bounds[dim][1] - self.bounds[dim][0]) + self.bounds[dim][0]
+
 
       self.p_best = self.x.clone()
-      self.g_best = self.x[self.PIMNO_function(self.x,self.true_x).argmin()].clone() #
+      self.g_best = self.x[self.PIMNO_function(self.x,self.true_x).argmin()] #
 
+   
       # 初始化历史记录列表
-      self.positions_history = [self.x.clone()]
-      self.objective_history = [self.PIMNO_function(self.x,self.true_x).clone()]
+      self.positions_history = [self.x]
+      self.objective_history = [self.PIMNO_function(self.x,self.true_x)]
    
    
-   def PIMNO_function(self, x, true_x):
-    # 确保维度正确
-    #x   是条件
-    num_particle = x.shape[0]
-    print("num_particle:",num_particle)
-    assert x.shape[1] == 2  # 确保每个粒子有两个维度
+   def PIMNO_function(self, x, true_x,**kwargs):
 
-    # 自动广播 true_x 到每个粒子
-    true_x_broadcasted = true_x.expand(x.size(0), -1)
-    true_x_broadcasted.requires_grad_(True)
-    x.requires_grad_(True)
-
-    # 计算分支网络的输出
-    self.hat_cb = self.branch_net(x) #[100,1]
-    grad_outputs = torch.ones_like(self.hat_cb)
-
-    # 计算关于x的梯度
-    s_grads = torch.autograd.grad(outputs=self.hat_cb,
-                                  inputs=x,
-                                  grad_outputs=grad_outputs,
-                                  create_graph=True)[0]
-
-    # 使用detach防止梯度追踪
-    x_detached = x.detach()
-
-    # 替换第一维度的值为真实值
-    x_detached[:, 0] = true_x_broadcasted[:, 0]
-    x_detached.requires_grad_(True)
-
-    # 计算分支网络的输出
-    self.true_a_cb = self.branch_net(x_detached)
-    t_grad = torch.autograd.grad(outputs=self.true_a_cb,
-                                 inputs=x_detached,
-                                 grad_outputs=grad_outputs,
-                                 create_graph=True)[0]
-
-    # 计算梯度损失和位置损失
-    g1_loss = self.mse_loss(s_grads, t_grad).mean(1)
-    yc1_loss = self.mse_loss(true_x_broadcasted[:, 0], x[:, 0])
-
-    # 扩展 hat_cb 以匹配 eta 的形状,有些时候需要1，因为是best的时候
-    self.ini_truc =self.trunk_net(self.ini)
-    self.ini_truc = self.ini_truc.expand(num_particle,self.ini_truc.shape[1],self.ini_truc.shape[2],self.ini_truc.shape[3])
-    self.eta_expand = self.eta.expand(num_particle,self.ini_truc.shape[1],self.ini_truc.shape[2],self.ini_truc.shape[3])
-
-    #hat eta
-    self.hat_eta = self.branch_net(x).unsqueeze(-1) .unsqueeze(-1) * self.ini_truc
-
-    mse_eta = self.mse_loss(self.hat_eta, self.eta_expand).mean([1, 2, 3]) 
-
-   
-     # 计算每个粒子的总损失
-    f = mse_eta +  self.config["gamma"] * g1_loss + self.config["lambda"] * yc1_loss
-    del  self.hat_eta
-    del  self.eta_expand
-    torch.cuda.empty_cache()  # Free up any released memory immediately
-
-    return f  # f 应该是 [num_particles] 的张量
 
       
-   def search(self):
+      self.net.eval() #评估，在评估模式下，BatchNorm 层会使用训练时累积的运行均值和方差，而不是当前批次的统计数据
+      num_particle = x.shape[0]
+      true_x_broadcasted = true_x.expand(x.size(0), -1)
+      x.requires_grad_(True) 
+      self.hat_cb = self.branch_net(x)
+      grad_outputs = torch.ones_like(self.hat_cb)
+
+      s_grads = torch.autograd.grad(outputs=self.hat_cb, inputs=x, grad_outputs=grad_outputs,
+                                    create_graph=True)[0]
+
+      x_detached = x.detach().clone()
+      x_detached[:, 0] = true_x_broadcasted[:, 0]
+      x_detached.requires_grad_(True)
+      self.true_a_cb = self.branch_net(x_detached)
+      t_grad = torch.autograd.grad(outputs=self.true_a_cb, inputs=x_detached, grad_outputs=grad_outputs,
+                                    create_graph=True)[0]
+
+      g1_loss = self.mse_loss(s_grads, t_grad).mean(1)
+      yc1_loss = self.mse_loss(true_x_broadcasted[:, 0], x[:, 0])
+
+      self.eta_expand = self.eta.expand(num_particle, -1, -1, -1)
+      self.ini_expand = self.ini.expand(num_particle,-1,-1,-1)
+
+      if self.decoder != None:
+         #反归一化
+         print("norm")
+         self.hat_eta = self.decoder.decode(self.net(self.ini, x) )#[b,640,1,300]
+      else:
+
+         self.hat_eta = self.net(self.ini, x) #[b,640,1,300]
+
+      mse_eta = self.mse_loss(self.hat_eta, self.eta_expand).mean([1, 2, 3])
+   
+      del x
+              # 清理内存
+      del self.hat_eta, self.eta_expand
+
+      torch.cuda.empty_cache()
+      
+      # 清除梯度
+      for param in self.branch_net.parameters():
+         param.grad = None
+      
+      # 计算总损失
+
+      f = 1e8*mse_eta + self.config['gamma'] * g1_loss + self.config['lambda'] * yc1_loss 
+      del x_detached,self.true_a_cb 
+      return f
+
+
+   def search(self,dat):
       
       #print(f"Function name: {func.__name__}")
       num_particles = self.config["num_particles"]
@@ -202,83 +215,153 @@ class Expr_Inverse():
       self.optimize(
                    num_iterations= self.config["iterations"],
                    )
+      self.save(dat=dat)
+      
+   def save(self,dat="test"):
+      '''
+      save to npz
+      '''
+        # 将字典保存为JSON文件
+      with open(f'Innverse_Out/{dat}/args.json', 'w') as json_file:
+            json.dump(self.config, json_file, indent=4)
+      # Convert lists of tensor positions and objectives to numpy arrays
+      positions_np = [to_numpy(pos) for pos in self.positions_history]  # Ensure tensors are moved to cpu and converted to numpy
+      objectives_np = [to_numpy(obj) for obj in self.objective_history]
+
+      # Save the arrays to an npz file
+      np.savez_compressed(f"{self.save_name}.npz",
+                           positions = positions_np, 
+                          objectives = objectives_np,
+                          gbest = to_numpy(self.g_best))
+
+      print(f"Data saved to {self.save_name}.npz")
    
-   def optimize(self, num_iterations, c1=1.5, c2=1.5, w=0.9):
-      with torch.no_grad():  # 在不需要计算梯度的环境中执行
-         for i in range(num_iterations):
-            r1 = torch.rand_like(self.x)
-            r2 = torch.rand_like(self.x)
-            self.v = w * self.v + c1 * r1 * (self.p_best - self.x) + c2 * r2 * (self.g_best - self.x)
-            self.x = self.x + self.v
+   def optimize(self, num_iterations, c1=0.03, c2=0.02, w=0.02):
+
+      step_size = 0.5  # Define the step size for the second dimension
+
+      for i in range(num_iterations):
+         r1 = torch.rand_like(self.x)
+         r2 = torch.rand_like(self.x)
+         self.v = w * self.v + c1 * r1 * (self.p_best - self.x) + c2 * r2 * (self.g_best - self.x)
+
+         self.x = self.x + self.v
 
 
-            # 更新个体最佳位置和全局最佳位置
-            # 应用边界条件
-            for dim in range(self.x.shape[1]):
-               self.x[:, dim] = torch.clamp(self.x[:, dim], min=self.bounds[dim][0], max=self.bounds[dim][1])
-               print("___x")
+         # Quantize the second dimension
+         self.x[:, 1] = torch.round(self.x[:, 1] / step_size) * step_size
+
+         # Apply boundary conditions for all dimensions
+         for dim in range(self.x.shape[1]):
+            self.x[:, dim] = torch.clamp(self.x[:, dim], min=self.bounds[dim][0], max=self.bounds[dim][1])
+
+         # Store positions history
+         self.positions_history.append(to_numpy(self.x))
+
+         print("t1", self.x[:, 1])
+
+         # Evaluate objective function
+         objective_values = self.PIMNO_function(self.x, self.true_x)
+         better_mask = objective_values < self.PIMNO_function(self.p_best, self.true_x)
+
+         # Broadcast better_mask to appropriate dimensions
+         better_mask = better_mask.unsqueeze(-1).expand_as(self.p_best)
+
+         # Update personal best positions
+         self.p_best = torch.where(better_mask, self.x, self.p_best)
+
+         # Ensure p_best also respects boundary conditions
+         for dim in range(self.p_best.shape[1]):
+            self.p_best[:, dim] = torch.clamp(self.p_best[:, dim], min=self.bounds[dim][0], max=self.bounds[dim][1])
+
+
+         # 更新全局最佳位置
+         current_best_idx = objective_values.argmin()
+         current_best_value = objective_values[current_best_idx]
+         self.g_best = self.g_best.detach().reshape(-1,2)
+         print("best",self.g_best)
+      
+         if (self.PIMNO_function(self.g_best, self.true_x) > current_best_value):#目标要更新
+               
+            self.g_best = self.x[current_best_idx]
          
 
-            
-            objective_values = self.PIMNO_function(self.x, self.true_x)  
-            better_mask = objective_values < self.PIMNO_function(self.p_best, self.true_x)
-            # 使用 better_mask 广播到合适的维度
-            better_mask = better_mask.unsqueeze(-1).expand_as(self.p_best)
-            self.p_best = torch.where(better_mask, self.x.detach(), self.p_best)
+         # 记录当前位置和目标函数值
 
-            #update 图
-            #self.update()
+         self.objective_history.append(objective_values.detach())
+         #update 图
+         self.update(iteration=i)
+         print(f"step {i}: {objective_values.min()}")  # 数量应与粒子数相同
+         print("best",self.g_best)
+         torch.cuda.empty_cache()
+         del r1,r2
+      return self.g_best
 
-            # 更新全局最佳位置
-            current_best_idx = objective_values.argmin()
-            current_best_value = objective_values[current_best_idx]
-            self.g_best = self.g_best.detach().reshape(-1,2)
-         
-            if (self.PIMNO_function(self.g_best, self.true_x) < current_best_value).all():#all 表示tensor里面所有的值都小
-                  
-               self.g_best = self.x[current_best_idx].detach().clone()
-            
-
-            # 记录当前位置和目标函数值
-         
-            self.positions_history.append(self.x.clone())
-            self.objective_history.append(objective_values.clone())
-            print(f"step {i}: {objective_values.min()}")  # 数量应与粒子数相同
-            print("best",self.g_best)
-            torch.cuda.empty_cache()
-         return self.g_best
-
-   def update(self):
+   def update(self,iteration):
       plt.ion()  # Turn on interactive mode
       fig, ax = plt.subplots(1, 3, figsize=(18, 6))  # Three subplots for three different visualizations
       clear_output(wait=True)
-      
+      # Generate a unique color for each star and create a colormap for each
+      num_examples = 5
+      colors = plt.cm.viridis(np.linspace(0, 1, num_examples))  # Use a color map to get distinct colors
+
+      def to_numpy(obj):
+      # 首先检查obj是否为PyTorch Tensor
+         if isinstance(obj, torch.Tensor):
+            # 检查张量是否在CUDA上
+            if obj.is_cuda:
+                  return obj.detach().cpu().numpy()  # 先从计算图中分离，然后移到CPU，最后转换为NumPy数组
+            else:
+                  return obj.detach().numpy()  # 如果在CPU上，直接分离并转换为NumPy数组
+         elif isinstance(obj, np.ndarray):
+            # 如果已经是NumPy数组，直接返回
+            return obj
+
       ax[0].cla()
-      ax[0].plot([o.min().item() for o in self.objective_history], 'r-')
-      ax[0].set_title('Minimum F Function Value Over Iterations')
-      ax[0].set_xlabel('Iteration')
-      ax[0].set_ylabel('Minimum F Value')
+      ax[0].plot([to_numpy(o.min())  for o in self.objective_history], 'b-',label="Min of values")
+      ax[0].set_title('Minimum F Value with Iterations',fontsize=20)
+      ax[0].set_xlabel('Iteration',fontsize=16)
+      ax[0].set_ylabel('F Value',fontsize=16)
+      ax[0].set_yscale("log")
+      ax[0].legend(loc='upper left')
 
       ax[1].cla()
-      num_examples = 10
-      for j in range(num_examples):
-         traj = np.array([pos[j].detach().numpy() for pos in self.positions_history])
-         ax[1].plot(traj[:, 0], traj[:, 1], marker='o', linestyle='-')
-      ax[1].set_title('Example Particle Trajectories')
-      ax[1].set_xlabel('Dimension 1')
-      ax[1].set_ylabel('Dimension 2')
 
+      for idx,j in enumerate(range(num_examples)):
+         traj = np.array([to_numpy(pos[j])for pos in self.positions_history])
+         color = colors[idx]  # Pick color for this star
+   
+         ax[1].scatter(traj[:, 0], traj[:, 1], facecolors='none', 
+                       edgecolors = color, s=(iteration+75)*1.25, 
+                       marker='o', alpha=0.9,label=f"Particle_{idx}")  # Draw hollow circles
+         ax[1].scatter(traj[:, 0], traj[:, 1], color=color, s=(iteration+50) * 1.15, marker='+', alpha=0.7)  # Draw small pluses
+         
+
+
+      
+      ax[1].scatter(to_numpy(self.true_x[0,0]),to_numpy(self.true_x[0,1]), 
+                    c='black', marker='*',s=150,label="True_Value")
+
+      ax[1].set_title('Particle Trajectories',fontsize=20)
+      ax[1].set_xlabel('A',fontsize=16)
+      ax[1].set_ylabel('L',fontsize=16)
+      ax[1].legend( loc='upper left')
+      
       ax[2].cla()
-      best_traj = np.array([
-         pos[self.objective_history[k].argmin().detach().item()].detach().numpy()  # Ensure that tensors are detached before converting to numpy
-         for k, pos in enumerate(self.positions_history)
-      ])
-      ax[2].plot(best_traj[:, 0], best_traj[:, 1], marker='o', linestyle='-', color='m')
-      ax[2].set_title('Trajectory of the Best Particle')
-      ax[2].set_xlabel('Dimension 1')
-      ax[2].set_ylabel('Dimension 2')
+      best_traj = np.array([to_numpy(pos[self.objective_history[k].argmin().item()]) 
+                            for k, pos in enumerate(self.positions_history)])
+     
+      ax[2].plot(best_traj[:, 0], best_traj[:, 1], linestyle='--',  marker='>',color='m')
+      ax[2].scatter(best_traj[:, 0], best_traj[:, 1], marker='+',
+                    s= (iteration+70)*1.2, alpha=0.9,label="Best")
+      ax[2].legend(loc='best')
+      ax[2].set_title('Trajectory of the Best Particle',fontsize=20)
+      ax[2].set_xlabel('A',fontsize=16)
+      ax[2].set_ylabel('L',fontsize=16)
+
+      plt.tight_layout()
       plt.savefig("trac.png",dpi=300)
-      plt.pause(0.05)  # Pause to update plots
+      plt.close()
 
 def args_to_config(args):
    '''
@@ -318,7 +401,7 @@ if __name__ == "__main__":
                       default = 1234,
                       help = 'seeds exprs')
   parser.add_argument('--gamma',type = float, 
-                      default=0,
+                      default=100000,
                       help = 'Gamma is in the yc1 gradients')
   parser.add_argument('--lamda',type = float, 
                       default=0,
@@ -327,7 +410,7 @@ if __name__ == "__main__":
                       default="3^10,1^10",
                       help="bounds of dimensions")
   parser.add_argument("--num_particles",type = int,
-                      default=100,
+                      default=1000,
                       help = "numbers")
   parser.add_argument("--dimensions",type = int,
                       default = 2,
@@ -344,19 +427,22 @@ if __name__ == "__main__":
   #net 文件
   net_path = "Inverse/mno_ckpt.pth"
   set_seed(12)
-  
-  ini = 2+torch.randn(1,1,1,300).to("cuda") # first 1 is time 
-  eta = 2+torch.randn(1,640,1,300).to("cuda") 
-  true_x =2+ torch.randn(1,2).to("cuda") 
+  device_set ="cuda"#cpu or cuda
+  ini = 2+torch.randn(1,1,1,300).to(device_set) # first 1 is time 
+  eta = 2+torch.randn(1,640,1,300).to(device_set) 
+  true_x = 2+ torch.randn(1,2).to(device_set) 
   print("true_x",true_x)
 
   expr = Expr_Inverse(config = config,
+                      device_set = device_set,
                       save_name = "test",
                       net = net_path,
                       ini = ini,
                       eta = eta,
-                      true_x=true_x)
-  expr.search()
+                      true_x=true_x,
+                    
+                       )
+  expr.search(dat="test")
   
   
   
