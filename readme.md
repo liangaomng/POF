@@ -20,13 +20,12 @@ $$ \eta(x,t_{0:99},C) = Brann(A,L) \circ  G(*,t_{0},C)$$
 
 The model‘ output is [640，100，3], the input is [1,100,3]
 
-
 ### there is two types of tasks , one is the meeting of NCHD  
 
     For  NCHD DATA:     
     https://drive.google.com/file/d/1X9fewAe40-ySEJjzard64RyO0klrHlJo/view?usp=drive_link.
 
-    For OCEAN DATA: It is not published now, please wait for months.
+    For POF DATA: It is published now, please see the link above name POF_dataset
 
 
 ## How to run it ?
